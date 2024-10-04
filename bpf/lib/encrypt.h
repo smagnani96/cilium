@@ -58,6 +58,13 @@ static __always_inline __u8 get_min_encrypt_key(__u8 peer_key __maybe_unused)
 }
 
 #ifdef ENABLE_IPSEC
+static __always_inline void
+set_ipsec_decrypt_mark(struct __ctx_buff *ctx, __u16 node_id)
+{
+	/* Decrypt "key" is determined by SPI and originating node */
+	ctx->mark = MARK_MAGIC_DECRYPT | node_id << 16;
+}
+
 # ifdef ENABLE_IPV4
 static __always_inline __u16
 lookup_ip4_node_id(__u32 ip4)
@@ -73,6 +80,46 @@ lookup_ip4_node_id(__u32 ip4)
 	if (!node_value->id)
 		return 0;
 	return node_value->id;
+}
+
+static __always_inline int
+do_decrypt_ipv4(struct __ctx_buff *ctx, struct iphdr *ip4)
+{
+	__u16 node_id = 0;
+	__u8 protocol = 0;
+	bool decrypted;
+
+	decrypted = ((ctx->mark & MARK_MAGIC_HOST_MASK) == MARK_MAGIC_DECRYPT);
+	protocol = ip4->protocol;
+	if (!decrypted) {
+		/* Allow all non-ESP packets up the stack per normal case
+		 * without encryption enabled.
+		 */
+		if (protocol != IPPROTO_ESP)
+			return CTX_ACT_OK;
+
+		node_id = lookup_ip4_node_id(ip4->saddr);
+		if (!node_id)
+			return send_drop_notify_error(ctx, UNKNOWN_ID, DROP_NO_NODE_ID,
+						      CTX_ACT_DROP,
+						      METRIC_INGRESS);
+		set_ipsec_decrypt_mark(ctx, node_id);
+
+		/* We are going to pass this up the stack for IPsec decryption
+		 * but eth_type_trans may already have labeled this as an
+		 * OTHERHOST type packet. To avoid being dropped by IP stack
+		 * before IPSec can be processed mark as a HOST packet.
+		 */
+		ctx_change_type(ctx, PACKET_HOST);
+		return CTX_ACT_OK;
+	}
+
+	ctx->mark = 0;
+#ifdef ENABLE_ENDPOINT_ROUTES
+	return CTX_ACT_OK;
+#else
+	return ctx_redirect(ctx, CILIUM_IFINDEX, 0);
+#endif /* ENABLE_ROUTING */
 }
 # endif /* ENABLE_IPV4 */
 
@@ -92,14 +139,48 @@ lookup_ip6_node_id(const union v6addr *ip6)
 		return 0;
 	return node_value->id;
 }
-# endif /* ENABLE_IPV6 */
 
-static __always_inline void
-set_ipsec_decrypt_mark(struct __ctx_buff *ctx, __u16 node_id)
+static __always_inline int
+do_decrypt_ipv6(struct __ctx_buff *ctx, struct ipv6hdr *ip6)
 {
-	/* Decrypt "key" is determined by SPI and originating node */
-	ctx->mark = MARK_MAGIC_DECRYPT | node_id << 16;
+	__u16 node_id = 0;
+	__u8 protocol = 0;
+	bool decrypted;
+
+	decrypted = ((ctx->mark & MARK_MAGIC_HOST_MASK) == MARK_MAGIC_DECRYPT);
+
+	protocol = ip6->nexthdr;
+	if (!decrypted) {
+		/* Allow all non-ESP packets up the stack per normal case
+		 * without encryption enabled.
+		 */
+		if (protocol != IPPROTO_ESP)
+			return CTX_ACT_OK;
+
+		node_id = lookup_ip6_node_id((union v6addr *)&ip6->saddr);
+		if (!node_id)
+			return send_drop_notify_error(ctx, UNKNOWN_ID, DROP_NO_NODE_ID,
+						      CTX_ACT_DROP,
+						      METRIC_INGRESS);
+		set_ipsec_decrypt_mark(ctx, node_id);
+
+		/* We are going to pass this up the stack for IPsec decryption
+		 * but eth_type_trans may already have labeled this as an
+		 * OTHERHOST type packet. To avoid being dropped by IP stack
+		 * before IPSec can be processed mark as a HOST packet.
+		 */
+		ctx_change_type(ctx, PACKET_HOST);
+		return CTX_ACT_OK;
+	}
+
+	ctx->mark = 0;
+#ifdef ENABLE_ENDPOINT_ROUTES
+	return CTX_ACT_OK;
+#else
+	return ctx_redirect(ctx, CILIUM_IFINDEX, 0);
+#endif /* ENABLE_ROUTING */
 }
+# endif /* ENABLE_IPV6 */
 
 static __always_inline int
 set_ipsec_encrypt(struct __ctx_buff *ctx, __u8 spi, __u32 tunnel_endpoint,
@@ -137,17 +218,12 @@ static __always_inline int
 do_decrypt(struct __ctx_buff *ctx, __u16 proto)
 {
 	void *data, *data_end;
-	__u8 protocol = 0;
-	__u16 node_id = 0;
-	bool decrypted;
 #ifdef ENABLE_IPV6
 	struct ipv6hdr *ip6;
 #endif
 #ifdef ENABLE_IPV4
 	struct iphdr *ip4;
 #endif
-
-	decrypted = ((ctx->mark & MARK_MAGIC_HOST_MASK) == MARK_MAGIC_DECRYPT);
 
 	switch (proto) {
 #ifdef ENABLE_IPV6
@@ -156,10 +232,7 @@ do_decrypt(struct __ctx_buff *ctx, __u16 proto)
 			ctx->mark = 0;
 			return CTX_ACT_OK;
 		}
-		protocol = ip6->nexthdr;
-		if (!decrypted)
-			node_id = lookup_ip6_node_id((union v6addr *)&ip6->saddr);
-		break;
+		return do_decrypt_ipv6(ctx, ip6);
 #endif
 #ifdef ENABLE_IPV4
 	case bpf_htons(ETH_P_IP):
@@ -167,42 +240,10 @@ do_decrypt(struct __ctx_buff *ctx, __u16 proto)
 			ctx->mark = 0;
 			return CTX_ACT_OK;
 		}
-		protocol = ip4->protocol;
-		if (!decrypted)
-			node_id = lookup_ip4_node_id(ip4->saddr);
-		break;
+		return do_decrypt_ipv4(ctx, ip4);
 #endif
-	default:
-		return CTX_ACT_OK;
 	}
-
-	if (!decrypted) {
-		/* Allow all non-ESP packets up the stack per normal case
-		 * without encryption enabled.
-		 */
-		if (protocol != IPPROTO_ESP)
-			return CTX_ACT_OK;
-
-		if (!node_id)
-			return send_drop_notify_error(ctx, UNKNOWN_ID, DROP_NO_NODE_ID,
-						      CTX_ACT_DROP,
-						      METRIC_INGRESS);
-		set_ipsec_decrypt_mark(ctx, node_id);
-
-		/* We are going to pass this up the stack for IPsec decryption
-		 * but eth_type_trans may already have labeled this as an
-		 * OTHERHOST type packet. To avoid being dropped by IP stack
-		 * before IPSec can be processed mark as a HOST packet.
-		 */
-		ctx_change_type(ctx, PACKET_HOST);
-		return CTX_ACT_OK;
-	}
-	ctx->mark = 0;
-#ifdef ENABLE_ENDPOINT_ROUTES
 	return CTX_ACT_OK;
-#else
-	return ctx_redirect(ctx, CILIUM_IFINDEX, 0);
-#endif /* ENABLE_ROUTING */
 }
 
 #if defined(ENABLE_ENCRYPTED_OVERLAY)
