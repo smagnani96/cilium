@@ -1368,6 +1368,12 @@ trace_netdev(struct __ctx_buff *ctx, bool from_host)
 			ctx_store_meta(ctx, CB_IPCACHE_SRC_LABEL, ipcache_srcid);
 # endif /* defined(ENABLE_HOST_FIREWALL) && !defined(ENABLE_MASQUERADE_IPV6) */
 		} else {
+#ifdef ENABLE_WIREGUARD
+			nexthdr = ip6->nexthdr;
+			l4_off = ETH_HLEN + ipv6_hdrlen(ctx, &nexthdr);
+			if (ctx_is_wireguard(ctx, l4_off, nexthdr, ipcache_srcid))
+				trace.reason = TRACE_REASON_ENCRYPTED;
+#endif
 #ifdef ENABLE_IPSEC
 			do_decrypt_ipv6(ctx, ip6);
 			if (ctx->mark == MARK_MAGIC_DECRYPT)
@@ -1398,6 +1404,12 @@ trace_netdev(struct __ctx_buff *ctx, bool from_host)
 			ctx_store_meta(ctx, CB_IPCACHE_SRC_LABEL, ipcache_srcid);
 # endif /* defined(ENABLE_HOST_FIREWALL) && !defined(ENABLE_MASQUERADE_IPV4) */
 		} else {
+#ifdef ENABLE_WIREGUARD
+			nexthdr = ip4->protocol;
+			l4_off = ETH_HLEN + ipv4_hdrlen(ip4);
+			if (ctx_is_wireguard(ctx, l4_off, nexthdr, ipcache_srcid))
+				trace.reason = TRACE_REASON_ENCRYPTED;
+#endif
 #ifdef ENABLE_IPSEC
 			do_decrypt_ipv4(ctx, ip4);
 			if (ctx->mark == MARK_MAGIC_DECRYPT)
