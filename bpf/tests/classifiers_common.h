@@ -1,6 +1,10 @@
 /* SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause) */
 /* Copyright Authors of Cilium */
 
+#define ENABLE_IPV4 1
+#define ENABLE_IPV6 1
+#define ENABLE_WIREGUARD 1
+
 #if defined(IS_BPF_WIREGUARD)
 # undef IS_BPF_WIREGUARD
 # include "bpf_wireguard.c"
@@ -88,6 +92,92 @@ int ctx_classify_by_eth_hlen_check(struct __ctx_buff *ctx)
 	assert(flags6 == (flags | CLS_FLAG_IPV6));
 
 	assert(((flags & CLS_FLAG_L3_DEV) != 0) == is_defined(IS_BPF_WIREGUARD));
+
+	test_finish();
+}
+
+PKTGEN("tc", "ctx_classify4")
+static __always_inline int
+ctx_classify4_pktgen(struct __ctx_buff *ctx) {
+	return pktgen(ctx, true);
+}
+
+CHECK("tc", "ctx_classify4")
+int ctx_classify4_check(struct __ctx_buff *ctx)
+{
+	test_init();
+
+	adjust_l2(ctx);
+
+	void *data, *data_end;
+	struct iphdr *ip4;
+	struct udphdr *udp;
+	cls_flags_t flags;
+
+	assert(revalidate_data(ctx, &data, &data_end, &ip4));
+
+	udp = (void *)ip4 + sizeof(struct iphdr);
+	if ((void *)udp + sizeof(struct udphdr) > data_end)
+		test_fatal("l4 out of bounds");
+
+	flags = ctx_classify4(ctx, true);
+
+	assert(!(flags & CLS_FLAG_WIREGUARD));
+
+	udp->source = bpf_htons(WG_PORT);
+
+	flags = ctx_classify4(ctx, true);
+
+	assert(((flags & CLS_FLAG_WIREGUARD) != 0) == is_defined(IS_BPF_HOST));
+
+	ctx->mark = MARK_MAGIC_ENCRYPT;
+
+	flags = ctx_classify4(ctx, false);
+
+	assert(((flags & CLS_FLAG_WIREGUARD) != 0) == is_defined(IS_BPF_HOST));
+
+	test_finish();
+}
+
+PKTGEN("tc", "ctx_classify6")
+static __always_inline int
+ctx_classify6_pktgen(struct __ctx_buff *ctx) {
+	return pktgen(ctx, false);
+}
+
+CHECK("tc", "ctx_classify6")
+int ctx_classify6_check(struct __ctx_buff *ctx)
+{
+	test_init();
+
+	adjust_l2(ctx);
+
+	void *data, *data_end;
+	struct ipv6hdr *ip6;
+	struct udphdr *udp;
+	cls_flags_t flags;
+
+	assert(revalidate_data(ctx, &data, &data_end, &ip6));
+
+	udp = (void *)ip6 + sizeof(struct ipv6hdr);
+	if ((void *)udp + sizeof(struct udphdr) > data_end)
+		test_fatal("l4 out of bounds");
+
+	flags = ctx_classify6(ctx, true);
+
+	assert(!(flags & CLS_FLAG_WIREGUARD));
+
+	udp->source = bpf_htons(WG_PORT);
+
+	flags = ctx_classify6(ctx, true);
+
+	assert(((flags & CLS_FLAG_WIREGUARD) != 0) == is_defined(IS_BPF_HOST));
+
+	ctx->mark = MARK_MAGIC_ENCRYPT;
+
+	flags = ctx_classify6(ctx, false);
+
+	assert(((flags & CLS_FLAG_WIREGUARD) != 0) == is_defined(IS_BPF_HOST));
 
 	test_finish();
 }

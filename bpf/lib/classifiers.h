@@ -4,12 +4,17 @@
 #pragma once
 
 #include "lib/common.h"
+#include "lib/l4.h"
+#include "lib/ipv4.h"
+#include "lib/ipv6.h"
 
 typedef __u8 cls_flags_t;
 
 enum {
 	CLS_FLAG_IPV6	   = (1 << 0),
 	CLS_FLAG_L3_DEV    = (1 << 1),
+	CLS_FLAG_DECRYPTED = (1 << 2),
+	CLS_FLAG_WIREGUARD = (1 << 3),
 };
 
 #define CLS_FLAG_NONE ((cls_flags_t)0)
@@ -53,8 +58,173 @@ _ctx_classify_by_eth_hlen6(const struct __sk_buff *ctx)
 
 	return _ctx_classify_by_eth_hlen(ctx) | CLS_FLAG_IPV6;
 }
+
+static __always_inline cls_flags_t
+_ctx_classify_from_mark(struct __sk_buff *ctx)
+{
+	if (is_defined(IS_BPF_HOST) && ctx_is_wireguard_encrypted(ctx))
+		return CLS_FLAG_WIREGUARD;
+
+	if (is_defined(IS_BPF_HOST) && ctx_is_wireguard_decrypted(ctx))
+		return CLS_FLAG_WIREGUARD | CLS_FLAG_DECRYPTED;
+
+	return CLS_FLAG_NONE;
+}
+
+static __always_inline cls_flags_t
+_ctx_classify_from_pkt_hdr(struct __sk_buff *ctx, int l4_off, __u8 l4_proto)
+{
+	struct {
+		__be16 sport;
+		__be16 dport;
+	} l4;
+
+	if (!(is_defined(ENABLE_WIREGUARD) && is_defined(IS_BPF_HOST)))
+		return CLS_FLAG_NONE;
+
+	switch (l4_proto) {
+	case IPPROTO_UDP:
+		if (l4_load_ports(ctx, l4_off + UDP_SPORT_OFF, &l4.sport) < 0)
+			break;
+
+		if (is_defined(ENABLE_WIREGUARD) && is_defined(IS_BPF_HOST) &&
+		    (l4.sport == bpf_htons(WG_PORT) || l4.dport == bpf_htons(WG_PORT)))
+			return CLS_FLAG_WIREGUARD;
+
+		break;
+	}
+
+	return CLS_FLAG_NONE;
+}
+
+static __always_inline cls_flags_t
+ctx_classify6(struct __sk_buff *ctx, bool dpi)
+{
+	cls_flags_t flags = CLS_FLAG_NONE;
+	void *data, *data_end;
+	struct ipv6hdr *ip6;
+	__u8 next_proto;
+	int hdrlen;
+
+	if (!(is_defined(ENABLE_WIREGUARD) && is_defined(IS_BPF_HOST)))
+		goto out;
+
+	flags = _ctx_classify_from_mark(ctx);
+	if (flags != CLS_FLAG_NONE)
+		goto out;
+
+	if (!dpi)
+		goto out;
+
+	if (!revalidate_data(ctx, &data, &data_end, &ip6))
+		goto out;
+
+	next_proto = ip6->nexthdr;
+	hdrlen = ipv6_hdrlen(ctx, &next_proto);
+
+	if (hdrlen < 0)
+		goto out;
+
+	flags = _ctx_classify_from_pkt_hdr(ctx, ETH_HLEN + hdrlen, next_proto);
+
+out:
+	return flags | CLS_FLAG_IPV6;
+}
+
+static __always_inline cls_flags_t
+ctx_classify4(struct __sk_buff *ctx, bool dpi)
+{
+	cls_flags_t flags = CLS_FLAG_NONE;
+	void *data, *data_end;
+	struct iphdr *ip4;
+	__u8 next_proto;
+	int hdrlen;
+
+	if (!(is_defined(ENABLE_WIREGUARD) && is_defined(IS_BPF_HOST)))
+		goto out;
+
+	flags = _ctx_classify_from_mark(ctx);
+	if (flags != CLS_FLAG_NONE)
+		goto out;
+
+	if (!dpi)
+		goto out;
+
+	if (!revalidate_data(ctx, &data, &data_end, &ip4))
+		goto out;
+
+	next_proto = ip4->protocol;
+	hdrlen = ipv4_hdrlen(ip4);
+	flags = _ctx_classify_from_pkt_hdr(ctx, ETH_HLEN + hdrlen, next_proto);
+
+out:
+	return flags;
+}
+
+static __always_inline cls_flags_t
+ctx_classify(struct __sk_buff *ctx, bool dpi)
+{
+	cls_flags_t flags = CLS_FLAG_NONE;
+	void *data, *data_end;
+	struct ipv6hdr *ip6;
+	struct iphdr *ip4;
+	__be16 proto;
+	__u8 next_proto;
+	int hdrlen;
+
+	if (!(is_defined(ENABLE_WIREGUARD) && is_defined(IS_BPF_HOST)))
+		goto out;
+
+	flags = _ctx_classify_from_mark(ctx);
+	if (flags != CLS_FLAG_NONE)
+		goto out;
+
+	if (!dpi)
+		goto out;
+
+	if (!validate_ethertype(ctx, &proto))
+		goto out;
+
+	switch (proto) {
+	case bpf_htons(ETH_P_IPV6):
+		flags = CLS_FLAG_IPV6;
+		if (!is_defined(ENABLE_IPV6))
+			goto out;
+
+		if (!revalidate_data_pull(ctx, &data, &data_end, &ip6))
+			goto out;
+
+		next_proto = ip6->nexthdr;
+		hdrlen = ipv6_hdrlen(ctx, &next_proto);
+
+		if (hdrlen < 0)
+			goto out;
+
+		flags |= _ctx_classify_from_pkt_hdr(ctx, ETH_HLEN + hdrlen, next_proto);
+
+		break;
+	case bpf_htons(ETH_P_IP):
+		if (!is_defined(ENABLE_IPV4))
+			goto out;
+
+		if (!revalidate_data_pull(ctx, &data, &data_end, &ip4))
+			goto out;
+
+		next_proto = ip4->protocol;
+		hdrlen = ipv4_hdrlen(ip4);
+		flags = _ctx_classify_from_pkt_hdr(ctx, ETH_HLEN + hdrlen, next_proto);
+
+		break;
+	}
+
+out:
+	return flags;
+}
 #else
 # define _ctx_classify_by_eth_hlen(ctx)       CLS_FLAG_NONE
 # define _ctx_classify_by_eth_hlen4(ctx)      CLS_FLAG_NONE
 # define _ctx_classify_by_eth_hlen6(ctx)      CLS_FLAG_NONE
+# define ctx_classify(ctx, proto)        CLS_FLAG_NONE
+# define ctx_classify4(ctx, ip4)         CLS_FLAG_NONE
+# define ctx_classify6(ctx, ip6)         CLS_FLAG_NONE
 #endif

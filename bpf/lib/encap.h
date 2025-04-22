@@ -31,7 +31,7 @@ __encap_with_nodeid4(struct __ctx_buff *ctx, __u32 src_ip, __be16 src_port,
 #endif
 
 	send_trace_notify_flags(ctx, TRACE_TO_OVERLAY, seclabel, dstid, TRACE_EP_ID_UNKNOWN,
-				*ifindex, ct_reason, monitor, CLS_FLAG_NONE);
+				*ifindex, ct_reason, monitor, ctx_classify4(ctx, false));
 
 	return ctx_set_encap_info4(ctx, src_ip, src_port, tunnel_endpoint, seclabel, vni,
 				   NULL, 0);
@@ -56,7 +56,7 @@ __encap_with_nodeid6(struct __ctx_buff *ctx, const union v6addr *tunnel_endpoint
 #endif
 
 	send_trace_notify_flags(ctx, TRACE_TO_OVERLAY, seclabel, dstid, TRACE_EP_ID_UNKNOWN,
-				*ifindex, ct_reason, monitor, CLS_FLAG_NONE);
+				*ifindex, ct_reason, monitor, ctx_classify6(ctx, false));
 
 	return ctx_set_encap_info6(ctx, tunnel_endpoint, seclabel, NULL, 0);
 }
