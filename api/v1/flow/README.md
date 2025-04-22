@@ -49,6 +49,7 @@
     - [DebugCapturePoint](#flow-DebugCapturePoint)
     - [DebugEventType](#flow-DebugEventType)
     - [DropReason](#flow-DropReason)
+    - [EncryptionType](#flow-EncryptionType)
     - [EventType](#flow-EventType)
     - [FlowType](#flow-FlowType)
     - [IPVersion](#flow-IPVersion)
@@ -479,7 +480,9 @@ L7 information for HTTP flows. It corresponds to Cilium&#39;s [accesslog.LogReco
 | source_xlated | [string](#string) |  | source_xlated is the post-translation source IP when the flow was SNATed. When &#34;source_xlated&#34; is set, the &#34;source&#34; field is populated with the pre-translation source IP address. |
 | destination | [string](#string) |  |  |
 | ipVersion | [IPVersion](#flow-IPVersion) |  |  |
-| encrypted | [bool](#bool) |  | This field indicates whether the TraceReasonEncryptMask is set or not. https://github.com/cilium/cilium/blob/ba0ed147bd5bb342f67b1794c2ad13c6e99d5236/pkg/monitor/datapath_trace.go#L27 |
+| encryptionProtocol | [EncryptionType](#flow-EncryptionType) |  |  |
+| encrypted | [bool](#bool) |  |  |
+| decrypted | [bool](#bool) |  |  |
 
 
 
@@ -1059,6 +1062,19 @@ here.
 | DROP_EP_NOT_READY | 203 | A BPF program wants to tail call some endpoint&#39;s policy program in cilium_call_policy, but the program is not available. |
 | DROP_NO_EGRESS_IP | 204 | An Egress Gateway node matched a packet against an Egress Gateway policy that didn&#39;t select a valid Egress IP. |
 | DROP_PUNT_PROXY | 205 | Punt packet to a user space proxy. |
+
+
+
+<a name="flow-EncryptionType"></a>
+
+### EncryptionType
+
+
+| Name | Number | Description |
+| ---- | ------ | ----------- |
+| ENCRYPTION_UNKNOWN | 0 |  |
+| WIREGUARD | 1 |  |
+| IPSEC | 2 |  |
 
 
 

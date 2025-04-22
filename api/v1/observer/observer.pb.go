@@ -97,6 +97,15 @@ const L7FlowType_SAMPLE = flow.L7FlowType_SAMPLE
 var L7FlowType_name = flow.L7FlowType_name
 var L7FlowType_value = flow.L7FlowType_value
 
+type EncryptionType = flow.EncryptionType
+
+const EncryptionType_ENCRYPTION_UNKNOWN = flow.EncryptionType_ENCRYPTION_UNKNOWN
+const EncryptionType_WIREGUARD = flow.EncryptionType_WIREGUARD
+const EncryptionType_IPSEC = flow.EncryptionType_IPSEC
+
+var EncryptionType_name = flow.EncryptionType_name
+var EncryptionType_value = flow.EncryptionType_value
+
 type IPVersion = flow.IPVersion
 
 const IPVersion_IP_NOT_USED = flow.IPVersion_IP_NOT_USED

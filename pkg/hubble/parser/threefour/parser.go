@@ -226,7 +226,23 @@ func (p *Parser) Decode(data []byte, decoded *pb.Flow) error {
 			}
 		}
 
+		if tn.IsIPSec() {
+			ip.EncryptionProtocol = pb.EncryptionType_IPSEC
+		} else if tn.IsWireguard() {
+			ip.EncryptionProtocol = pb.EncryptionType_WIREGUARD
+		}
 		ip.Encrypted = tn.IsEncrypted()
+		ip.Decrypted = tn.IsDecrypted()
+	}
+
+	if dn != nil && ip != nil {
+		if dn.IsIPSec() {
+			ip.EncryptionProtocol = pb.EncryptionType_IPSEC
+		} else if dn.IsWireguard() {
+			ip.EncryptionProtocol = pb.EncryptionType_WIREGUARD
+		}
+		ip.Encrypted = dn.IsEncrypted()
+		ip.Decrypted = dn.IsDecrypted()
 	}
 
 	srcLabelID, dstLabelID := decodeSecurityIdentities(dn, tn, pvn)

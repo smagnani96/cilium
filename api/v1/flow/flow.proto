@@ -296,9 +296,9 @@ message IP {
     string source_xlated = 5;
     string destination = 2;
     IPVersion ipVersion = 3;
-    // This field indicates whether the TraceReasonEncryptMask is set or not.
-    // https://github.com/cilium/cilium/blob/ba0ed147bd5bb342f67b1794c2ad13c6e99d5236/pkg/monitor/datapath_trace.go#L27
-    bool encrypted = 4;
+    EncryptionType encryptionProtocol = 4;
+    bool encrypted = 6;
+    bool decrypted = 7;    
 }
 
 message Ethernet {
@@ -336,6 +336,12 @@ message ICMPv4 {
 message ICMPv6 {
     uint32 type = 1;
     uint32 code = 2;
+}
+
+enum EncryptionType {
+    ENCRYPTION_UNKNOWN = 0;
+    WIREGUARD = 1;
+    IPSEC = 2;
 }
 
 enum IPVersion {

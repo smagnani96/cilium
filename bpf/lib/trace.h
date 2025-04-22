@@ -14,7 +14,7 @@
  * @dst_id:	destination endpoint id or proxy destination port
  * @ifindex:	network interface index
  * @reason:	reason for forwarding the packet (TRACE_REASON_*),
- *		e.g. return value of ct_lookup or TRACE_REASON_ENCRYPTED
+ *		e.g. return value of ct_lookup
  * @monitor:	monitor aggregation value, e.g. the 'monitor' output of ct_lookup
  *
  * If TRACE_NOTIFY is not defined, the API will be compiled in as a NOP.
@@ -59,10 +59,6 @@ enum trace_reason {
 	TRACE_REASON_SRV6_ENCAP,
 	TRACE_REASON_SRV6_DECAP,
 	TRACE_REASON_ENCRYPT_OVERLAY,
-	/* Note: TRACE_REASON_ENCRYPTED is used as a mask. Beware if you add
-	 * new values below it, they would match with that mask.
-	 */
-	TRACE_REASON_ENCRYPTED = 0x80,
 } __packed;
 
 /* Trace aggregation levels. */
@@ -83,7 +79,7 @@ enum {
  * _update_trace_metrics
  * @ctx:	socket buffer
  * @obs_point:	observation point (TRACE_*)
- * @reason:	reason for forwarding the packet (TRACE_REASON_*)
+ * @flags:	additional trace flags (CLS_FLAG_*)
  * @line: line of code of the caller
  * @file: file of the caller
  *
@@ -91,10 +87,8 @@ enum {
  */
 static __always_inline void
 _update_trace_metrics(struct __ctx_buff *ctx, enum trace_point obs_point,
-		      enum trace_reason reason, __u16 line, __u8 file)
+		      cls_flags_t flags, __u16 line, __u8 file)
 {
-	__u8 encrypted;
-
 	switch (obs_point) {
 	case TRACE_TO_LXC:
 		_update_metrics(ctx_full_len(ctx), METRIC_INGRESS,
@@ -111,13 +105,13 @@ _update_trace_metrics(struct __ctx_buff *ctx, enum trace_point obs_point,
 	case TRACE_FROM_STACK:
 	case TRACE_FROM_OVERLAY:
 	case TRACE_FROM_NETWORK:
-		encrypted = reason & TRACE_REASON_ENCRYPTED;
-		if (!encrypted)
-			_update_metrics(ctx_full_len(ctx), METRIC_INGRESS,
-					REASON_PLAINTEXT, line, file);
-		else
+		if ((is_defined(ENABLE_IPSEC) && flags == CLS_FLAG_IPSEC) ||
+			(is_defined(ENABLE_WIREGUARD) && flags == CLS_FLAG_WIREGUARD))
 			_update_metrics(ctx_full_len(ctx), METRIC_INGRESS,
 					REASON_DECRYPT, line, file);
+		else
+			_update_metrics(ctx_full_len(ctx), METRIC_INGRESS,
+					REASON_PLAINTEXT, line, file);
 		break;
 	/* TRACE_FROM_LXC, i.e endpoint-to-endpoint delivery is handled
 	 * separately in ipv*_local_delivery() where we can bump an egress
@@ -231,7 +225,7 @@ _send_trace_notify(struct __ctx_buff *ctx, enum trace_point obs_point,
 	};
 	struct trace_notify msg __align_stack_8;
 
-	_update_trace_metrics(ctx, obs_point, reason, line, file);
+	_update_trace_metrics(ctx, obs_point, flags, line, file);
 
 	if (!emit_trace_notify(obs_point, monitor))
 		return;
@@ -277,7 +271,7 @@ _send_trace_notify4(struct __ctx_buff *ctx, enum trace_point obs_point,
 	};
 	struct trace_notify msg __align_stack_8;
 
-	_update_trace_metrics(ctx, obs_point, reason, line, file);
+	_update_trace_metrics(ctx, obs_point, flags, line, file);
 
 	if (!emit_trace_notify(obs_point, monitor))
 		return;
@@ -323,7 +317,7 @@ _send_trace_notify6(struct __ctx_buff *ctx, enum trace_point obs_point,
 	};
 	struct trace_notify msg __align_stack_8;
 
-	_update_trace_metrics(ctx, obs_point, reason, line, file);
+	_update_trace_metrics(ctx, obs_point, flags, line, file);
 
 	if (!emit_trace_notify(obs_point, monitor))
 		return;
@@ -357,21 +351,21 @@ static __always_inline void
 _send_trace_notify(struct __ctx_buff *ctx, enum trace_point obs_point,
 		   __u32 src __maybe_unused, __u32 dst __maybe_unused,
 		   __u16 dst_id __maybe_unused, __u32 ifindex __maybe_unused,
-		   enum trace_reason reason, __u32 monitor __maybe_unused,
-		   cls_flags_t flags __maybe_unused, __u16 line, __u8 file)
+		   enum trace_reason reason __maybe_unused, __u32 monitor __maybe_unused,
+		   cls_flags_t flags, __u16 line, __u8 file)
 {
-	_update_trace_metrics(ctx, obs_point, reason, line, file);
+	_update_trace_metrics(ctx, obs_point, flags, line, file);
 }
 
 static __always_inline void
 _send_trace_notify4(struct __ctx_buff *ctx, enum trace_point obs_point,
 		    __u32 src __maybe_unused, __u32 dst __maybe_unused,
 		    __be32 orig_addr __maybe_unused, __u16 dst_id __maybe_unused,
-		    __u32 ifindex __maybe_unused, enum trace_reason reason,
-		    __u32 monitor __maybe_unused, cls_flags_t flags __maybe_unused,
+		    __u32 ifindex __maybe_unused, enum trace_reason reason __maybe_unused,
+		    __u32 monitor __maybe_unused, cls_flags_t flags,
 			__u16 line, __u8 file)
 {
-	_update_trace_metrics(ctx, obs_point, reason, line, file);
+	_update_trace_metrics(ctx, obs_point, flags, line, file);
 }
 
 static __always_inline void
@@ -379,10 +373,10 @@ _send_trace_notify6(struct __ctx_buff *ctx, enum trace_point obs_point,
 		    __u32 src __maybe_unused, __u32 dst __maybe_unused,
 		    union v6addr *orig_addr __maybe_unused,
 		    __u16 dst_id __maybe_unused, __u32 ifindex __maybe_unused,
-		    enum trace_reason reason, __u32 monitor __maybe_unused,
-			cls_flags_t flags __maybe_unused, __u16 line, __u8 file)
+		    enum trace_reason reason __maybe_unused, __u32 monitor __maybe_unused,
+			cls_flags_t flags, __u16 line, __u8 file)
 {
-	_update_trace_metrics(ctx, obs_point, reason, line, file);
+	_update_trace_metrics(ctx, obs_point, flags, line, file);
 }
 #endif /* TRACE_NOTIFY */
 

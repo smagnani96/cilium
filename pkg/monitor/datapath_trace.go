@@ -31,6 +31,15 @@ const (
 	// TraceNotifyFlagIsL3Device is set in TraceNotify.Flags when the
 	// notification refers to a L3 device.
 	TraceNotifyFlagIsL3Device
+	// TraceNotifyFlagIsDecrypted is set in TraceNotify.Flags when the
+	// notification refers to a decrypted network packet.
+	TraceNotifyFlagIsDecrypted
+	// TraceNotifyFlagIsWireguard is set in TraceNotify.Flags when the
+	// notification refers to an encrypted Wireguard packet.
+	TraceNotifyFlagIsWireguard
+	// TraceNotifyFlagIsIPSec is set in TraceNotify.Flags when the
+	// notification refers to an encrypted IPSec packet.
+	TraceNotifyFlagIsIPSec
 )
 
 const (
@@ -96,16 +105,10 @@ func (tn *TraceNotify) decodeTraceNotify(data []byte) error {
 	return nil
 }
 
-// IsEncrypted returns true when the notification has the encrypt flag set,
-// false otherwise.
-func (n *TraceNotify) IsEncrypted() bool {
-	return (n.Reason & TraceReasonEncryptMask) != 0
-}
-
 // TraceReason returns the trace reason for this notification, see the
 // TraceReason* constants.
 func (n *TraceNotify) TraceReason() uint8 {
-	return n.Reason & ^TraceReasonEncryptMask
+	return n.Reason
 }
 
 // TraceReasonIsKnown returns false when the trace reason is unknown, true
@@ -158,8 +161,6 @@ const (
 	TraceReasonSRv6Encap
 	TraceReasonSRv6Decap
 	TraceReasonEncryptOverlay
-	// TraceReasonEncryptMask is the bit used to indicate encryption or not.
-	TraceReasonEncryptMask = uint8(0x80)
 )
 
 /* keep in sync with api/v1/flow/flow.proto */
@@ -191,8 +192,17 @@ func (n *TraceNotify) dumpIdentity(buf *bufio.Writer, numeric DisplayFormat) {
 }
 
 func (n *TraceNotify) encryptReasonString() string {
-	if n.IsEncrypted() {
-		return "encrypted "
+	switch {
+	case n.IsIPSec():
+		if n.IsDecrypted() {
+			return "decrypted (ipsec)"
+		}
+		return "encrypted (ipsec)"
+	case n.IsWireguard():
+		if n.IsDecrypted() {
+			return "decrypted (wireguard)"
+		}
+		return "encrypted (wireguard)"
 	}
 	return ""
 }
@@ -253,6 +263,30 @@ func (n *TraceNotify) IsL3Device() bool {
 // IsIPv6 returns true if the trace refers to an IPv6 packet.
 func (n *TraceNotify) IsIPv6() bool {
 	return n.Flags&TraceNotifyFlagIsIPv6 != 0
+}
+
+// IsWireguard returns true when the notification has the encrypt Wireguard flag set,
+// false otherwise.
+func (n *TraceNotify) IsWireguard() bool {
+	return n.Flags&TraceNotifyFlagIsWireguard != 0
+}
+
+// IsIPSec returns true when the notification has the encrypt IPSec flag set,
+// false otherwise.
+func (n *TraceNotify) IsIPSec() bool {
+	return n.Flags&TraceNotifyFlagIsIPSec != 0
+}
+
+// IsIPSec returns true when the notification has the decrypt flag set,
+// false otherwise.
+func (n *TraceNotify) IsDecrypted() bool {
+	return n.Flags&TraceNotifyFlagIsDecrypted != 0
+}
+
+// IsEncrypted returns true when either IsIPSec() or IsWireguard() is true,
+// false otherwise.
+func (n *TraceNotify) IsEncrypted() bool {
+	return !n.IsDecrypted() && (n.IsIPSec() || n.IsWireguard())
 }
 
 // OriginalIP returns the original source IP if reverse NAT was performed on
