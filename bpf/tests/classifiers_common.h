@@ -5,6 +5,9 @@
 #define ENABLE_IPV6 1
 #define ENABLE_IPSEC 1
 #define ENABLE_WIREGUARD 1
+#define HAVE_ENCAP 1
+#define ENCAP_IFINDEX 1
+#define TUNNEL_PROTOCOL TUNNEL_PROTOCOL_VXLAN
 
 #if defined(IS_BPF_WIREGUARD)
 # undef IS_BPF_WIREGUARD
@@ -131,6 +134,12 @@ int ctx_classify4_check(struct __ctx_buff *ctx)
 
 	assert(((flags & CLS_FLAG_WIREGUARD) != 0) == is_defined(IS_BPF_HOST));
 
+	udp->source = bpf_htons(TUNNEL_PORT);
+
+	flags = ctx_classify4(ctx, true);
+
+	assert(flags & CLS_FLAG_VXLAN);
+
 	ctx->mark = MARK_MAGIC_ENCRYPT;
 
 	flags = ctx_classify4(ctx, false);
@@ -142,6 +151,12 @@ int ctx_classify4_check(struct __ctx_buff *ctx)
 	flags = ctx_classify4(ctx, true);
 
 	assert(((flags & CLS_FLAG_IPSEC) != 0) == is_defined(IS_BPF_HOST));
+
+	ctx->mark = MARK_MAGIC_OVERLAY;
+
+	flags = ctx_classify4(ctx, false);
+
+	assert(flags & CLS_FLAG_VXLAN);
 
 	test_finish();
 }
@@ -180,6 +195,12 @@ int ctx_classify6_check(struct __ctx_buff *ctx)
 
 	assert(((flags & CLS_FLAG_WIREGUARD) != 0) == is_defined(IS_BPF_HOST));
 
+	udp->source = bpf_htons(TUNNEL_PORT);
+
+	flags = ctx_classify6(ctx, true);
+
+	assert(flags & CLS_FLAG_VXLAN);
+
 	ctx->mark = MARK_MAGIC_ENCRYPT;
 
 	flags = ctx_classify6(ctx, false);
@@ -191,6 +212,12 @@ int ctx_classify6_check(struct __ctx_buff *ctx)
 	flags = ctx_classify6(ctx, true);
 
 	assert(((flags & CLS_FLAG_IPSEC) != 0) == is_defined(IS_BPF_HOST));
+
+	ctx->mark = MARK_MAGIC_OVERLAY;
+
+	flags = ctx_classify6(ctx, false);
+
+	assert(flags & CLS_FLAG_VXLAN);
 
 	test_finish();
 }

@@ -44,7 +44,7 @@ func (tp EncapProtocol) toDpID() string {
 	case Geneve:
 		return "2"
 	default:
-		return ""
+		return "0"
 	}
 }
 
@@ -187,10 +187,6 @@ func (cfg Config) datapathConfigProvider() (dpcfgdef.NodeOut, dpcfgdef.NodeFnOut
 	definesFn := func() (dpcfgdef.Map, error) { return nil, nil }
 
 	if cfg.EncapProtocol() != Disabled {
-		defines[fmt.Sprintf("TUNNEL_PROTOCOL_%s", strings.ToUpper(VXLAN.String()))] = VXLAN.toDpID()
-		defines[fmt.Sprintf("TUNNEL_PROTOCOL_%s", strings.ToUpper(Geneve.String()))] = Geneve.toDpID()
-		defines["TUNNEL_PROTOCOL"] = cfg.EncapProtocol().toDpID()
-		defines["TUNNEL_PORT"] = fmt.Sprintf("%d", cfg.Port())
 		defines["TUNNEL_SRC_PORT_LOW"] = fmt.Sprintf("%d", cfg.SrcPortLow())
 		defines["TUNNEL_SRC_PORT_HIGH"] = fmt.Sprintf("%d", cfg.SrcPortHigh())
 
@@ -205,6 +201,11 @@ func (cfg Config) datapathConfigProvider() (dpcfgdef.NodeOut, dpcfgdef.NodeFnOut
 			}, nil
 		}
 	}
+	// Always define the following macros to allow us writing clang-free code via is_defined() rather than #ifdef.
+	defines[fmt.Sprintf("TUNNEL_PROTOCOL_%s", strings.ToUpper(VXLAN.String()))] = VXLAN.toDpID()
+	defines[fmt.Sprintf("TUNNEL_PROTOCOL_%s", strings.ToUpper(Geneve.String()))] = Geneve.toDpID()
+	defines["TUNNEL_PROTOCOL"] = cfg.EncapProtocol().toDpID()
+	defines["TUNNEL_PORT"] = fmt.Sprintf("%d", cfg.Port())
 
 	return dpcfgdef.NodeOut{NodeDefines: defines}, dpcfgdef.NewNodeFnOut(definesFn)
 }
