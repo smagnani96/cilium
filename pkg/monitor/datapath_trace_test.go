@@ -81,7 +81,7 @@ func TestDecodeTraceNotifyErrors(t *testing.T) {
 
 func TestTraceFlags(t *testing.T) {
 	tn := &TraceNotify{
-		Flags: 0x1f,
+		Flags: 0x7f,
 	}
 	require.True(t, tn.IsIPv6())
 	require.True(t, tn.IsL3Device())
@@ -89,6 +89,8 @@ func TestTraceFlags(t *testing.T) {
 	require.True(t, tn.IsWireguard())
 	require.True(t, tn.IsEncrypted())
 	require.True(t, tn.IsDecrypted())
+	require.True(t, tn.IsVXLAN())
+	require.True(t, tn.IsGeneve())
 }
 
 func TestTraceReason(t *testing.T) {

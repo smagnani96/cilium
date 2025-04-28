@@ -33,7 +33,7 @@ func TestDecodeDropNotify(t *testing.T) {
 		File:     0x20,
 		ExtError: 0x21,
 		Ifindex:  0x22_23_24_25,
-		Flags:    0x1f,
+		Flags:    0x7f,
 	}
 	buf := bytes.NewBuffer(nil)
 	err := binary.Write(buf, byteorder.Native, input)
@@ -63,6 +63,8 @@ func TestDecodeDropNotify(t *testing.T) {
 	require.True(t, output.IsWireguard())
 	require.True(t, output.IsEncrypted())
 	require.True(t, output.IsDecrypted())
+	require.True(t, output.IsVXLAN())
+	require.True(t, output.IsGeneve())
 }
 
 func TestDecodeDropNotifyErrors(t *testing.T) {
