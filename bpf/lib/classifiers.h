@@ -15,6 +15,7 @@ enum {
 	CLS_FLAG_L3_DEV    = (1 << 1),
 	CLS_FLAG_DECRYPTED = (1 << 2),
 	CLS_FLAG_WIREGUARD = (1 << 3),
+	CLS_FLAG_IPSEC     = (1 << 4),
 };
 
 #define CLS_FLAG_NONE ((cls_flags_t)0)
@@ -68,6 +69,12 @@ _ctx_classify_from_mark(struct __sk_buff *ctx)
 	if (is_defined(IS_BPF_HOST) && ctx_is_wireguard_decrypted(ctx))
 		return CLS_FLAG_WIREGUARD | CLS_FLAG_DECRYPTED;
 
+	if (is_defined(IS_BPF_HOST) && (ctx_is_overlay_encrypted(ctx) || ctx_is_ipsec_encrypted(ctx)))
+		return CLS_FLAG_IPSEC;
+
+	if (is_defined(IS_BPF_HOST) && ctx_is_ipsec_decrypted(ctx))
+		return CLS_FLAG_IPSEC | CLS_FLAG_DECRYPTED;
+
 	return CLS_FLAG_NONE;
 }
 
@@ -79,10 +86,16 @@ _ctx_classify_from_pkt_hdr(struct __sk_buff *ctx, int l4_off, __u8 l4_proto)
 		__be16 dport;
 	} l4;
 
-	if (!(is_defined(ENABLE_WIREGUARD) && is_defined(IS_BPF_HOST)))
+	if (!(is_defined(ENABLE_WIREGUARD) && is_defined(IS_BPF_HOST)) &&
+		!(is_defined(ENABLE_IPSEC) && is_defined(IS_BPF_HOST)))
 		return CLS_FLAG_NONE;
 
 	switch (l4_proto) {
+	case IPPROTO_ESP:
+		if (is_defined(ENABLE_IPSEC) && is_defined(IS_BPF_HOST))
+			return CLS_FLAG_IPSEC;
+
+		break;
 	case IPPROTO_UDP:
 		if (l4_load_ports(ctx, l4_off + UDP_SPORT_OFF, &l4.sport) < 0)
 			break;
@@ -106,7 +119,8 @@ ctx_classify6(struct __sk_buff *ctx, bool dpi)
 	__u8 next_proto;
 	int hdrlen;
 
-	if (!(is_defined(ENABLE_WIREGUARD) && is_defined(IS_BPF_HOST)))
+	if (!(is_defined(ENABLE_WIREGUARD) && is_defined(IS_BPF_HOST)) &&
+		!(is_defined(ENABLE_IPSEC) && is_defined(IS_BPF_HOST)))
 		goto out;
 
 	flags = _ctx_classify_from_mark(ctx);
@@ -140,7 +154,8 @@ ctx_classify4(struct __sk_buff *ctx, bool dpi)
 	__u8 next_proto;
 	int hdrlen;
 
-	if (!(is_defined(ENABLE_WIREGUARD) && is_defined(IS_BPF_HOST)))
+	if (!(is_defined(ENABLE_WIREGUARD) && is_defined(IS_BPF_HOST)) &&
+		!(is_defined(ENABLE_IPSEC) && is_defined(IS_BPF_HOST)))
 		goto out;
 
 	flags = _ctx_classify_from_mark(ctx);
@@ -172,7 +187,8 @@ ctx_classify(struct __sk_buff *ctx, bool dpi)
 	__u8 next_proto;
 	int hdrlen;
 
-	if (!(is_defined(ENABLE_WIREGUARD) && is_defined(IS_BPF_HOST)))
+	if (!(is_defined(ENABLE_WIREGUARD) && is_defined(IS_BPF_HOST)) &&
+		!(is_defined(ENABLE_IPSEC) && is_defined(IS_BPF_HOST)))
 		goto out;
 
 	flags = _ctx_classify_from_mark(ctx);
