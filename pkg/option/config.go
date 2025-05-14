@@ -1630,6 +1630,7 @@ type DaemonConfig struct {
 	IPv4NodeAddr            string
 	SocketPath              string
 	TracePayloadlen         int
+	TracePayloadlenOverlay  int
 	Version                 string
 	PrometheusServeAddr     string
 	ToFQDNsMinTTL           int
@@ -2808,6 +2809,7 @@ func (c *DaemonConfig) Populate(vp *viper.Viper) {
 	c.ExternalEnvoyProxy = vp.GetBool(ExternalEnvoyProxy)
 	c.SocketPath = vp.GetString(SocketPath)
 	c.TracePayloadlen = vp.GetInt(TracePayloadlen)
+	c.TracePayloadlenOverlay = vp.GetInt(TracePayloadlenOverlay)
 	c.Version = vp.GetString(Version)
 	c.PolicyTriggerInterval = vp.GetDuration(PolicyTriggerInterval)
 	c.CTMapEntriesTimeoutTCP = vp.GetDuration(CTMapEntriesTimeoutTCPName)

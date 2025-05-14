@@ -263,7 +263,22 @@ ctx_classify(struct __sk_buff *ctx, bool dpi)
 out:
 	return flags;
 }
+
+/* Compute payload length from the given classifiers:
+ * - TRACE_PAYLOAD_LEN_OVERLAY, when CLS_FLAG_{VXLAN,GENEVE} is set
+ * - TRACE_PAYLOAD_LEN, otherwise.
+ */
+static __always_inline __u64
+_ctx_payloadlen_from_flags(cls_flags_t flags)
+{
+	if  (is_defined(HAVE_ENCAP) &&
+		((flags & CLS_FLAG_VXLAN) || (flags & CLS_FLAG_GENEVE)))
+		return CONFIG(trace_payload_len_overlay);
+
+	return CONFIG(trace_payload_len);
+}
 #else
+# define _ctx_payloadlen_from_flags(flags)    CONFIG(trace_payload_len)
 # define _ctx_classify_by_eth_hlen(ctx)       CLS_FLAG_NONE
 # define _ctx_classify_by_eth_hlen4(ctx)      CLS_FLAG_NONE
 # define _ctx_classify_by_eth_hlen6(ctx)      CLS_FLAG_NONE

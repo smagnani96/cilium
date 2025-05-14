@@ -63,12 +63,12 @@ int __send_drop_notify(struct __ctx_buff *ctx)
 {
 	/* Mask needed to calm verifier. */
 	__u32 error = ctx_load_meta(ctx, 2) & 0xFFFFFFFF;
-	__u64 ctx_len = ctx_full_len(ctx);
-	__u64 cap_len = min_t(__u64, TRACE_PAYLOAD_LEN, ctx_len);
+	__u64 cap_len, ctx_len = ctx_full_len(ctx);
 	__u32 meta4 = ctx_load_meta(ctx, 4);
 	__u16 line = (__u16)(meta4 >> 16);
 	__u8 file = (__u8)(meta4 >> 8);
 	__u8 exitcode = (__u8)meta4;
+	__u8 flags = (__u8)(error >> 16);
 	struct ratelimit_key rkey = {
 		.usage = RATELIMIT_USAGE_EVENTS_MAP,
 	};
@@ -84,6 +84,8 @@ int __send_drop_notify(struct __ctx_buff *ctx)
 			return exitcode;
 	}
 
+	cap_len = min_t(__u64, _ctx_payloadlen_from_flags(flags), ctx_len);
+
 	msg = (typeof(msg)) {
 		__notify_common_hdr(CILIUM_NOTIFY_DROP, (__u8)error),
 		__notify_pktcap_hdr((__u32)ctx_len, (__u16)cap_len, NOTIFY_DROP_VER),
@@ -94,7 +96,7 @@ int __send_drop_notify(struct __ctx_buff *ctx)
 		.file           = file,
 		.ext_error      = (__s8)(__u8)(error >> 8),
 		.ifindex        = ctx_get_ifindex(ctx),
-		.flags          = _ctx_classify_by_eth_hlen(ctx) | (__u8)(error >> 16),
+		.flags          = _ctx_classify_by_eth_hlen(ctx) | flags,
 	};
 
 	ctx_event_output(ctx, &cilium_events,

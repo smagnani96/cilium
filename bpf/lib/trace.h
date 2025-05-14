@@ -205,9 +205,7 @@ _send_trace_notify(struct __ctx_buff *ctx, enum trace_point obs_point,
 		   enum trace_reason reason, __u32 monitor, cls_flags_t flags,
 		   __u16 line, __u8 file)
 {
-	__u64 ctx_len = ctx_full_len(ctx);
-	__u64 cap_len = min_t(__u64, monitor ? : TRACE_PAYLOAD_LEN,
-			      ctx_len);
+	__u64 cap_len, ctx_len = ctx_full_len(ctx);
 	struct ratelimit_key rkey = {
 		.usage = RATELIMIT_USAGE_EVENTS_MAP,
 	};
@@ -227,6 +225,10 @@ _send_trace_notify(struct __ctx_buff *ctx, enum trace_point obs_point,
 		if (!ratelimit_check_and_take(&rkey, &settings))
 			return;
 	}
+
+	cap_len =  min_t(__u64,
+		monitor && monitor != TRACE_PAYLOAD_LEN ? monitor : _ctx_payloadlen_from_flags(flags),
+		ctx_len);
 
 	msg = (typeof(msg)) {
 		__notify_common_hdr(CILIUM_NOTIFY_TRACE, obs_point),
@@ -251,9 +253,7 @@ _send_trace_notify4(struct __ctx_buff *ctx, enum trace_point obs_point,
 		    __u32 ifindex, enum trace_reason reason, __u32 monitor,
 		    cls_flags_t flags, __u16 line, __u8 file)
 {
-	__u64 ctx_len = ctx_full_len(ctx);
-	__u64 cap_len = min_t(__u64, monitor ? : TRACE_PAYLOAD_LEN,
-			      ctx_len);
+	__u64 cap_len, ctx_len = ctx_full_len(ctx);
 	struct ratelimit_key rkey = {
 		.usage = RATELIMIT_USAGE_EVENTS_MAP,
 	};
@@ -273,6 +273,10 @@ _send_trace_notify4(struct __ctx_buff *ctx, enum trace_point obs_point,
 		if (!ratelimit_check_and_take(&rkey, &settings))
 			return;
 	}
+
+	cap_len =  min_t(__u64,
+		monitor && monitor != TRACE_PAYLOAD_LEN ? monitor : _ctx_payloadlen_from_flags(flags),
+		ctx_len);
 
 	msg = (typeof(msg)) {
 		__notify_common_hdr(CILIUM_NOTIFY_TRACE, obs_point),
@@ -297,9 +301,7 @@ _send_trace_notify6(struct __ctx_buff *ctx, enum trace_point obs_point,
 		    __u16 dst_id, __u32 ifindex, enum trace_reason reason,
 		    __u32 monitor, cls_flags_t flags, __u16 line, __u8 file)
 {
-	__u64 ctx_len = ctx_full_len(ctx);
-	__u64 cap_len = min_t(__u64, monitor ? : TRACE_PAYLOAD_LEN,
-			      ctx_len);
+	__u64 cap_len, ctx_len = ctx_full_len(ctx);
 	struct ratelimit_key rkey = {
 		.usage = RATELIMIT_USAGE_EVENTS_MAP,
 	};
@@ -319,6 +321,10 @@ _send_trace_notify6(struct __ctx_buff *ctx, enum trace_point obs_point,
 		if (!ratelimit_check_and_take(&rkey, &settings))
 			return;
 	}
+
+	cap_len =  min_t(__u64,
+		monitor && monitor != TRACE_PAYLOAD_LEN ? monitor : _ctx_payloadlen_from_flags(flags),
+		ctx_len);
 
 	msg = (typeof(msg)) {
 		__notify_common_hdr(CILIUM_NOTIFY_TRACE, obs_point),

@@ -22,6 +22,9 @@
 #include "common.h"
 #include "pktgen.h"
 
+ASSIGN_CONFIG(__u64, trace_payload_len, 128ULL);
+ASSIGN_CONFIG(__u64, trace_payload_len_overlay, 192ULL);
+
 /* Remove the L2 layer to simulate packet in an L3 device. */
 static __always_inline void
 adjust_l2(struct __ctx_buff *ctx)
@@ -88,6 +91,7 @@ int ctx_classify_by_eth_hlen_check(struct __ctx_buff *ctx)
 	cls_flags_t flags = _ctx_classify_by_eth_hlen(ctx);
 	cls_flags_t flags4 = _ctx_classify_by_eth_hlen4(ctx);
 	cls_flags_t flags6 = _ctx_classify_by_eth_hlen6(ctx);
+	__u32 monitor = _ctx_payloadlen_from_flags(flags);
 
 	assert(flags4 == flags);
 
@@ -96,6 +100,35 @@ int ctx_classify_by_eth_hlen_check(struct __ctx_buff *ctx)
 	assert(flags6 == (flags | CLS_FLAG_IPV6));
 
 	assert(((flags & CLS_FLAG_L3_DEV) != 0) == is_defined(IS_BPF_WIREGUARD));
+
+	assert(monitor == CONFIG(trace_payload_len));
+
+	test_finish();
+}
+
+PKTGEN("tc", "ctx_payloadlen_from_flags")
+static __always_inline int
+ctx_payloadlen_from_flags_pktgen(struct __ctx_buff *ctx) {
+	return pktgen(ctx, true);
+}
+
+CHECK("tc", "ctx_payloadlen_from_flags")
+int ctx_payloadlen_from_flags_check(struct __ctx_buff *ctx)
+{
+	test_init();
+
+	adjust_l2(ctx);
+
+	cls_flags_t flags = CLS_FLAG_NONE;
+	__u32 monitor = _ctx_payloadlen_from_flags(flags);
+
+	assert(monitor == CONFIG(trace_payload_len));
+
+	flags = CLS_FLAG_VXLAN;
+
+	monitor = _ctx_payloadlen_from_flags(flags);
+
+	assert(monitor == CONFIG(trace_payload_len_overlay));
 
 	test_finish();
 }
