@@ -26,7 +26,7 @@ var errors = map[uint8]string{
 	9:   "Fragmented packet",
 	10:  "Fragmented packet entry update failed",
 	11:  "Missed tail call to custom program",
-	12:  "Interface Decrypting",    // Unused
+	12:  "Interface Encrypted",
 	13:  "Interface Encrypting",    // Unused
 	130: "Invalid source mac",      // Unused
 	131: "Invalid destination mac", // Unused

@@ -96,17 +96,30 @@ _update_trace_metrics(struct __ctx_buff *ctx, enum trace_point obs_point,
 	case TRACE_TO_STACK:
 	case TRACE_TO_OVERLAY:
 	case TRACE_TO_NETWORK:
-		_update_metrics(ctx_full_len(ctx), METRIC_EGRESS,
-				REASON_FORWARDED, line, file);
+		if ((is_defined(ENABLE_WIREGUARD) || is_defined(ENABLE_IPSEC)) &&
+			(flags & CLS_FLAG_DECRYPTED) != 0)
+			_update_metrics(ctx_full_len(ctx), METRIC_EGRESS,
+					REASON_DECRYPT, line, file);
+		else if ((is_defined(ENABLE_WIREGUARD) && flags == CLS_FLAG_WIREGUARD) ||
+				 (is_defined(ENABLE_IPSEC) && flags == CLS_FLAG_IPSEC))
+			_update_metrics(ctx_full_len(ctx), METRIC_EGRESS,
+					REASON_ENCRYPT, line, file);
+		else
+			_update_metrics(ctx_full_len(ctx), METRIC_EGRESS,
+					REASON_FORWARDED, line, file);
 		break;
 	case TRACE_FROM_HOST:
 	case TRACE_FROM_STACK:
 	case TRACE_FROM_OVERLAY:
 	case TRACE_FROM_NETWORK:
-		if ((is_defined(ENABLE_IPSEC) && flags == CLS_FLAG_IPSEC) ||
-			(is_defined(ENABLE_WIREGUARD) && flags == CLS_FLAG_WIREGUARD))
+		if ((is_defined(ENABLE_WIREGUARD) || is_defined(ENABLE_IPSEC)) &&
+			(flags & CLS_FLAG_DECRYPTED) != 0)
 			_update_metrics(ctx_full_len(ctx), METRIC_INGRESS,
 					REASON_DECRYPT, line, file);
+		else if ((is_defined(ENABLE_WIREGUARD) && flags == CLS_FLAG_WIREGUARD) ||
+				 (is_defined(ENABLE_IPSEC) && flags == CLS_FLAG_IPSEC))
+			_update_metrics(ctx_full_len(ctx), METRIC_INGRESS,
+					REASON_ENCRYPT, line, file);
 		else
 			_update_metrics(ctx_full_len(ctx), METRIC_INGRESS,
 					REASON_PLAINTEXT, line, file);
