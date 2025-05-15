@@ -339,7 +339,11 @@ int cil_from_wireguard(struct __ctx_buff *ctx)
 	return TC_ACT_OK;
 }
 
-/* to-wireguard is attached as a tc egress filter to the cilium_wg0 device. */
+/* to-wireguard is attached as a tc egress filter to the cilium_wg0 device.
+ * There's no need to handle rev-NAT xlations with tunneling enabled or w/o KPR.
+ * However, we're always attaching the program for updating bpf metrics, tracing
+ * the packet and setting the mark to MARK_MAGIC_ENCRYPT.
+ */
 __section_entry
 int cil_to_wireguard(struct __ctx_buff *ctx)
 {
@@ -358,8 +362,9 @@ int cil_to_wireguard(struct __ctx_buff *ctx)
 		src_sec_identity = get_identity(ctx);
 
 	bpf_clear_meta(ctx);
+	ctx->mark = MARK_MAGIC_WG_ENCRYPTED;
 
-#ifdef ENABLE_NODEPORT
+#if !defined(HAVE_ENCAP) && defined(ENABLE_NODEPORT)
 	if (magic == MARK_MAGIC_OVERLAY)
 		goto out;
 
@@ -369,7 +374,7 @@ int cil_to_wireguard(struct __ctx_buff *ctx)
 						  METRIC_EGRESS);
 
 out:
-#endif /* ENABLE_NODEPORT */
+#endif /* !HAVE_ENCAP && ENABLE_NODEPORT */
 
 	send_trace_notify(ctx, TRACE_TO_CRYPTO, src_sec_identity, UNKNOWN_ID,
 			  TRACE_EP_ID_UNKNOWN, THIS_INTERFACE_IFINDEX,
