@@ -249,10 +249,26 @@ static __always_inline bool ctx_is_overlay(const struct __sk_buff *ctx)
 
 static __always_inline bool ctx_is_overlay_encrypted(const struct __sk_buff *ctx)
 {
-	if (!is_defined(HAVE_ENCAP))
+	if (!is_defined(HAVE_ENCAP) || !is_defined(ENABLE_IPSEC))
 		return false;
 
 	return (ctx->mark & MARK_MAGIC_KEY_MASK) == MARK_MAGIC_OVERLAY_ENCRYPTED;
+}
+
+static __always_inline bool ctx_is_ipsec_encrypted(const struct __sk_buff *ctx)
+{
+	if (!is_defined(ENABLE_IPSEC))
+		return false;
+
+	return (ctx->mark & MARK_MAGIC_HOST_MASK) == MARK_MAGIC_ENCRYPT;
+}
+
+static __always_inline bool ctx_is_ipsec_decrypted(const struct __sk_buff *ctx)
+{
+	if (!is_defined(ENABLE_IPSEC))
+		return false;
+
+	return (ctx->mark & MARK_MAGIC_HOST_MASK) == MARK_MAGIC_DECRYPT;
 }
 
 static __always_inline bool ctx_is_wireguard_encrypted(const struct __sk_buff *ctx)
