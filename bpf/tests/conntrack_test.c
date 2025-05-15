@@ -46,7 +46,7 @@ int bpf_test(__maybe_unused struct __sk_buff *sctx)
 		struct ct_entry entry = {};
 		union tcp_flags flags = {};
 		__u32 then;
-		int monitor;
+		int monitor = 0;
 
 		/* No update initially; mostly just because __now is less than the
 		 * default report interval.
@@ -107,7 +107,7 @@ int bpf_test(__maybe_unused struct __sk_buff *sctx)
 			test_fatal("ct entry lookup failed");
 
 		union tcp_flags seen_flags = {0};
-		__u32 monitor;
+		__u32 monitor = 0;
 
 		seen_flags.value |= TCP_FLAG_SYN;
 
