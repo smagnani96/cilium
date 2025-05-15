@@ -144,11 +144,7 @@ l3_to_l2_fast_redirect_setup(struct __ctx_buff *ctx, bool is_ingress, bool is_ip
 	void *data_end = (void *)(long)ctx->data_end;
 	__u64 flags = BPF_F_ADJ_ROOM_FIXED_GSO;
 	struct metrics_key key = {
-#if defined(IS_BPF_HOST)
 		.reason = is_ingress ? REASON_PLAINTEXT : REASON_FORWARDED,
-#elif defined(IS_BPF_WIREGUARD)
-		.reason = is_ingress ? REASON_DECRYPTING : REASON_ENCRYPTING,
-#endif
 		.dir = is_ingress ? METRIC_INGRESS : METRIC_EGRESS,
 	};
 
@@ -187,11 +183,7 @@ ingress_l3_to_l2_fast_redirect_check(__maybe_unused const struct __ctx_buff *ctx
 
 	struct metrics_value *entry = NULL;
 	struct metrics_key key = {
-#if defined(IS_BPF_HOST)
 		.reason = REASON_PLAINTEXT,
-#elif defined(IS_BPF_WIREGUARD)
-		.reason = REASON_DECRYPTING,
-#endif
 		.dir = METRIC_INGRESS,
 	};
 
@@ -307,11 +299,7 @@ egress_l3_to_l2_fast_redirect_check(__maybe_unused const struct __ctx_buff *ctx,
 
 	struct metrics_value *entry = NULL;
 	struct metrics_key key = {
-#if defined(IS_BPF_HOST)
 		.reason = REASON_FORWARDED,
-#elif defined(IS_BPF_WIREGUARD)
-		.reason = REASON_ENCRYPTING,
-#endif
 		.dir = METRIC_EGRESS,
 	};
 

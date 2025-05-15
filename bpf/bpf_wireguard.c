@@ -303,7 +303,7 @@ int cil_from_wireguard(struct __ctx_buff *ctx)
 
 		flags = ctx_classify6(ctx, true);
 
-		send_trace_notify_flags(ctx, TRACE_FROM_CRYPTO, identity, UNKNOWN_ID,
+		send_trace_notify_flags(ctx, TRACE_FROM_STACK, identity, UNKNOWN_ID,
 					TRACE_EP_ID_UNKNOWN, ctx->ingress_ifindex,
 					trace.reason, trace.monitor, flags);
 
@@ -323,7 +323,7 @@ int cil_from_wireguard(struct __ctx_buff *ctx)
 
 		flags = ctx_classify4(ctx, true);
 
-		send_trace_notify_flags(ctx, TRACE_FROM_CRYPTO, identity, UNKNOWN_ID,
+		send_trace_notify_flags(ctx, TRACE_FROM_STACK, identity, UNKNOWN_ID,
 					TRACE_EP_ID_UNKNOWN, ctx->ingress_ifindex,
 					trace.reason, trace.monitor, flags);
 
@@ -340,7 +340,7 @@ int cil_from_wireguard(struct __ctx_buff *ctx)
 	}
 #endif /* !HAVE_ENCAP || (ENABLE_NODEPORT && ENABLE_NODE_ENCRYPTION)*/
 
-	send_trace_notify(ctx, TRACE_FROM_CRYPTO, UNKNOWN_ID, UNKNOWN_ID,
+	send_trace_notify(ctx, TRACE_FROM_STACK, UNKNOWN_ID, UNKNOWN_ID,
 			  TRACE_EP_ID_UNKNOWN, ctx->ingress_ifindex,
 			  trace.reason, trace.monitor);
 
@@ -385,7 +385,7 @@ int cil_to_wireguard(struct __ctx_buff *ctx)
 out:
 #endif /* !HAVE_ENCAP && ENABLE_NODEPORT */
 
-	send_trace_notify_flags(ctx, TRACE_TO_CRYPTO, src_sec_identity, UNKNOWN_ID,
+	send_trace_notify_flags(ctx, TRACE_TO_STACK, src_sec_identity, UNKNOWN_ID,
 				TRACE_EP_ID_UNKNOWN, THIS_INTERFACE_IFINDEX,
 				trace.reason, trace.monitor, ctx_classify(ctx, false));
 
