@@ -501,6 +501,14 @@ const (
 	// - any value between 64B-128B would still require access to 2 cache-lines
 	TracePayloadLen = 128
 
+	// TracePayloadLenOverlay is the default length of payload to capture when tracing overlay packets.
+	// The above TracePayloadLen might not be enough, resulting in a decode error for packets:
+	// - TCPv6 with options over VXLANv4 (>=134B) -- decode error
+	// - TCPv6 with SRv6 segments (>=136B) -- decode error
+	// - {ICMP,UDP,TCP}v6 over (future) VXLANv6 (>=132B) -- decode error
+	// The value is aligned to 3 cache-lines, see above comment in TracePayloadLen.
+	TracePayloadLenOverlay = 192
+
 	// Use the CiliumInternalIPs (vs. NodeInternalIPs) for IPsec encapsulation.
 	UseCiliumInternalIPForIPsec = false
 
