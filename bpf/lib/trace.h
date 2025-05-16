@@ -378,25 +378,25 @@ _send_trace_notify6(struct __ctx_buff *ctx, enum trace_point obs_point,
 #endif /* TRACE_NOTIFY */
 
 #define send_trace_notify(ctx, obs_point, src, dst, dst_id, ifindex, reason, monitor) \
-		_send_trace_notify(ctx, obs_point, src, dst, dst_id, ifindex, reason, monitor, CLS_FLAG_NONE, \
+		_send_trace_notify(ctx, obs_point, src, dst, dst_id, ifindex, reason, monitor, ctx_classify(ctx, false), \
 			__MAGIC_LINE__, __MAGIC_FILE__)
 
 #define send_trace_notify4(ctx, obs_point, src, dst, orig_addr, dst_id, ifindex, reason, monitor) \
-		_send_trace_notify4(ctx, obs_point, src, dst, orig_addr, dst_id, ifindex, reason, monitor, CLS_FLAG_NONE, \
+		_send_trace_notify4(ctx, obs_point, src, dst, orig_addr, dst_id, ifindex, reason, monitor, ctx_classify(ctx, false), \
 			__MAGIC_LINE__, __MAGIC_FILE__)
 
 #define send_trace_notify6(ctx, obs_point, src, dst, orig_addr, dst_id, ifindex, reason, monitor) \
-		_send_trace_notify6(ctx, obs_point, src, dst, orig_addr, dst_id, ifindex, reason, monitor, CLS_FLAG_NONE, \
+		_send_trace_notify6(ctx, obs_point, src, dst, orig_addr, dst_id, ifindex, reason, monitor, ctx_classify(ctx, false), \
 			__MAGIC_LINE__, __MAGIC_FILE__)
 
 #define send_trace_notify_flags(ctx, obs_point, src, dst, dst_id, ifindex, reason, monitor, flags) \
-		_send_trace_notify(ctx, obs_point, src, dst, dst_id, ifindex, reason, monitor, flags, \
+		_send_trace_notify(ctx, obs_point, src, dst, dst_id, ifindex, reason, monitor, ctx_classify(ctx, false), \
 			__MAGIC_LINE__, __MAGIC_FILE__)
 
 #define send_trace_notify_flags4(ctx, obs_point, src, dst, orig_addr, dst_id, ifindex, reason, monitor, flags) \
-		_send_trace_notify4(ctx, obs_point, src, dst, orig_addr, dst_id, ifindex, reason, monitor, flags, \
+		_send_trace_notify4(ctx, obs_point, src, dst, orig_addr, dst_id, ifindex, reason, monitor, ctx_classify(ctx, false), \
 			__MAGIC_LINE__, __MAGIC_FILE__)
 
 #define send_trace_notify_flags6(ctx, obs_point, src, dst, orig_addr, dst_id, ifindex, reason, monitor, flags) \
-		_send_trace_notify6(ctx, obs_point, src, dst, orig_addr, dst_id, ifindex, reason, monitor, flags, \
+		_send_trace_notify6(ctx, obs_point, src, dst, orig_addr, dst_id, ifindex, reason, monitor, ctx_classify(ctx, false), \
 			__MAGIC_LINE__, __MAGIC_FILE__)

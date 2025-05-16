@@ -23,7 +23,7 @@ enum {
 #define CLS_FLAG_NONE ((cls_flags_t)0)
 
 /* Classifiers are used only for tracing TC packets in bpf_{host,wireguard}. */
-#if defined(IS_BPF_WIREGUARD) || defined(IS_BPF_HOST)
+#if __ctx_is == __ctx_skb
 /* Compute classifiers for a potential L3 packet based on ETH_HLEN.
  * This is expected to be used right before emitting a trace/drop notification
  * in {trace,drop}.h, so that they can be correctly decoded from Monitor/Hubble.
@@ -65,16 +65,16 @@ _ctx_classify_by_eth_hlen6(const struct __sk_buff *ctx)
 static __always_inline cls_flags_t
 _ctx_classify_from_mark(struct __sk_buff *ctx)
 {
-	if (is_defined(IS_BPF_HOST) && ctx_is_wireguard_encrypted(ctx))
+	if (ctx_is_wireguard_encrypted(ctx))
 		return CLS_FLAG_WIREGUARD;
 
-	if (is_defined(IS_BPF_HOST) && ctx_is_wireguard_decrypted(ctx))
+	if (ctx_is_wireguard_decrypted(ctx))
 		return CLS_FLAG_WIREGUARD | CLS_FLAG_DECRYPTED;
 
-	if (is_defined(IS_BPF_HOST) && (ctx_is_overlay_encrypted(ctx) || ctx_is_ipsec_encrypted(ctx)))
+	if (ctx_is_overlay_encrypted(ctx) || ctx_is_ipsec_encrypted(ctx))
 		return CLS_FLAG_IPSEC;
 
-	if (is_defined(IS_BPF_HOST) && ctx_is_ipsec_decrypted(ctx))
+	if (ctx_is_ipsec_decrypted(ctx))
 		return CLS_FLAG_IPSEC | CLS_FLAG_DECRYPTED;
 
 	if (ctx_is_overlay(ctx))
@@ -98,14 +98,9 @@ _ctx_classify_from_pkt_hdr(struct __sk_buff *ctx, int l4_off, __u8 l4_proto)
 		__be16 dport;
 	} l4;
 
-	if (!(is_defined(ENABLE_WIREGUARD) && is_defined(IS_BPF_HOST)) &&
-		!(is_defined(ENABLE_IPSEC) && is_defined(IS_BPF_HOST)) &&
-	    !(is_defined(HAVE_ENCAP)))
-		return CLS_FLAG_NONE;
-
 	switch (l4_proto) {
 	case IPPROTO_ESP:
-		if (is_defined(ENABLE_IPSEC) && is_defined(IS_BPF_HOST))
+		if (is_defined(ENABLE_IPSEC))
 			return CLS_FLAG_IPSEC;
 
 		break;
@@ -113,7 +108,7 @@ _ctx_classify_from_pkt_hdr(struct __sk_buff *ctx, int l4_off, __u8 l4_proto)
 		if (l4_load_ports(ctx, l4_off + UDP_SPORT_OFF, &l4.sport) < 0)
 			break;
 
-		if (is_defined(ENABLE_WIREGUARD) && is_defined(IS_BPF_HOST) &&
+		if (is_defined(ENABLE_WIREGUARD) &&
 		    (l4.sport == bpf_htons(WG_PORT) || l4.dport == bpf_htons(WG_PORT)))
 			return CLS_FLAG_WIREGUARD;
 
@@ -142,11 +137,6 @@ ctx_classify6(struct __sk_buff *ctx, bool dpi)
 	struct ipv6hdr *ip6;
 	__u8 next_proto;
 	int hdrlen;
-
-	if (!(is_defined(ENABLE_WIREGUARD) && is_defined(IS_BPF_HOST)) &&
-		!(is_defined(ENABLE_IPSEC) && is_defined(IS_BPF_HOST)) &&
-	    !(is_defined(HAVE_ENCAP)))
-		goto out;
 
 	flags = _ctx_classify_from_mark(ctx);
 	if (flags != CLS_FLAG_NONE)
@@ -179,11 +169,6 @@ ctx_classify4(struct __sk_buff *ctx, bool dpi)
 	__u8 next_proto;
 	int hdrlen;
 
-	if (!(is_defined(ENABLE_WIREGUARD) && is_defined(IS_BPF_HOST)) &&
-		!(is_defined(ENABLE_IPSEC) && is_defined(IS_BPF_HOST)) &&
-	    !(is_defined(HAVE_ENCAP)))
-		goto out;
-
 	flags = _ctx_classify_from_mark(ctx);
 	if (flags != CLS_FLAG_NONE)
 		goto out;
@@ -212,11 +197,6 @@ ctx_classify(struct __sk_buff *ctx, bool dpi)
 	__be16 proto;
 	__u8 next_proto;
 	int hdrlen;
-
-	if (!(is_defined(ENABLE_WIREGUARD) && is_defined(IS_BPF_HOST)) &&
-		!(is_defined(ENABLE_IPSEC) && is_defined(IS_BPF_HOST)) &&
-	    !(is_defined(HAVE_ENCAP)))
-		goto out;
 
 	flags = _ctx_classify_from_mark(ctx);
 	if (flags != CLS_FLAG_NONE)

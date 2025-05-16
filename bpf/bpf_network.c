@@ -22,7 +22,7 @@ int cil_from_network(struct __ctx_buff *ctx)
 		.reason = TRACE_REASON_UNKNOWN,
 		.monitor = 0,
 	};
-	cls_flags_t flags = CLS_FLAG_NONE;
+	cls_flags_t __maybe_unused flags = CLS_FLAG_NONE;
 	enum trace_point obs_point_to = TRACE_TO_STACK;
 	enum trace_point obs_point_from = TRACE_FROM_NETWORK;
 
