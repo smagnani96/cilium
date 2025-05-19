@@ -68,7 +68,7 @@ int __send_drop_notify(struct __ctx_buff *ctx)
 	__u16 line = (__u16)(meta4 >> 16);
 	__u8 file = (__u8)(meta4 >> 8);
 	__u8 exitcode = (__u8)meta4;
-	__u8 flags = (__u8)(error >> 16);
+	__u8 flags;
 	struct ratelimit_key rkey = {
 		.usage = RATELIMIT_USAGE_EVENTS_MAP,
 	};
@@ -84,6 +84,7 @@ int __send_drop_notify(struct __ctx_buff *ctx)
 			return exitcode;
 	}
 
+	flags = ctx_classify(ctx, true);
 	cap_len = min_t(__u64, _ctx_payloadlen_from_flags(flags), ctx_len);
 
 	msg = (typeof(msg)) {
@@ -96,7 +97,7 @@ int __send_drop_notify(struct __ctx_buff *ctx)
 		.file           = file,
 		.ext_error      = (__s8)(__u8)(error >> 8),
 		.ifindex        = ctx_get_ifindex(ctx),
-		.flags          = _ctx_classify_by_eth_hlen(ctx) | flags,
+		.flags          = flags,
 	};
 
 	ctx_event_output(ctx, &cilium_events,
@@ -190,7 +191,7 @@ int _send_drop_notify(__u8 file __maybe_unused, __u16 line __maybe_unused,
 
 /* Push additional flags (8 bits) into the error value. */
 #define __DROP_REASON_EXT_FLAGS(err, ext_err, flags) ({ \
-	__DROP_REASON_EXT(err, ext_err) | ((__u8)((cls_flags_t)(flags)) << 16); \
+	__DROP_REASON_EXT(err, ext_err); \
 })
 
 #define send_drop_notify(ctx, src, dst, dst_id, reason, direction) \

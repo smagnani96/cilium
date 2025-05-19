@@ -301,8 +301,6 @@ int cil_from_wireguard(struct __ctx_buff *ctx)
 		identity = resolve_srcid_ipv6(ctx, ip6);
 		ctx_store_meta(ctx, CB_SRC_LABEL, identity);
 
-		flags = ctx_classify6(ctx, true);
-
 		send_trace_notify_flags(ctx, TRACE_FROM_STACK, identity, UNKNOWN_ID,
 					TRACE_EP_ID_UNKNOWN, ctx->ingress_ifindex,
 					trace.reason, trace.monitor, flags);
@@ -320,8 +318,6 @@ int cil_from_wireguard(struct __ctx_buff *ctx)
 
 		identity = resolve_srcid_ipv4(ctx, ip4);
 		ctx_store_meta(ctx, CB_SRC_LABEL, identity);
-
-		flags = ctx_classify4(ctx, true);
 
 		send_trace_notify_flags(ctx, TRACE_FROM_STACK, identity, UNKNOWN_ID,
 					TRACE_EP_ID_UNKNOWN, ctx->ingress_ifindex,
@@ -380,14 +376,14 @@ int cil_to_wireguard(struct __ctx_buff *ctx)
 	ret = handle_nat_fwd(ctx, 0, src_sec_identity, proto, true, &trace, &ext_err);
 	if (IS_ERR(ret))
 		return send_drop_notify_error_ext_flags(ctx, src_sec_identity, ret, ext_err,
-							METRIC_EGRESS, ctx_classify(ctx, false));
+							METRIC_EGRESS, CLS_FLAG_NONE);
 
 out:
 #endif /* !HAVE_ENCAP && ENABLE_NODEPORT */
 
 	send_trace_notify_flags(ctx, TRACE_TO_STACK, src_sec_identity, UNKNOWN_ID,
 				TRACE_EP_ID_UNKNOWN, THIS_INTERFACE_IFINDEX,
-				trace.reason, trace.monitor, ctx_classify(ctx, false));
+				trace.reason, trace.monitor, CLS_FLAG_NONE);
 
 	return TC_ACT_OK;
 }
