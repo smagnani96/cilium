@@ -36,14 +36,14 @@ var stdReadWriter = struct {
 	Writer: os.Stdout,
 }
 
-func dialShell(w io.Writer) (net.Conn, error) {
+func dialShell(w io.Writer, path string) (net.Conn, error) {
 	var conn net.Conn
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	for {
 		var err error
 		var d net.Dialer
-		conn, err = d.DialContext(ctx, "unix", defaults.ShellSockPath)
+		conn, err = d.DialContext(ctx, "unix", path)
 		if err == nil {
 			break
 		}
@@ -59,7 +59,11 @@ func dialShell(w io.Writer) (net.Conn, error) {
 }
 
 func ShellExchange(w io.Writer, format string, args ...any) error {
-	conn, err := dialShell(os.Stderr)
+	return ShellExchangePath(w, defaults.ShellSockPath, format, args...)
+}
+
+func ShellExchangePath(w io.Writer, path string, format string, args ...any) error {
+	conn, err := dialShell(os.Stderr, path)
 	if err != nil {
 		return err
 	}
@@ -139,7 +143,7 @@ func interactiveShell() {
 	// Try to dial the shell.sock. Since it takes a moment for the server to come up and this
 	// is meant for interactive use we'll try to be helpful and retry the dialing until
 	// server comes up.
-	conn, err := dialShell(console)
+	conn, err := dialShell(console, defaults.ShellSockPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %s\n", err)
 		os.Exit(1)

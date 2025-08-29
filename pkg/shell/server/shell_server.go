@@ -18,6 +18,7 @@ import (
 	"github.com/cilium/hive/cell"
 	"github.com/cilium/hive/job"
 	"github.com/cilium/hive/script"
+	"github.com/spf13/pflag"
 
 	"github.com/cilium/cilium/pkg/defaults"
 	"github.com/cilium/cilium/pkg/logging/logfields"
@@ -26,8 +27,18 @@ import (
 var Cell = cell.Module(
 	"shell",
 	"Cilium debug shell",
+
+	cell.Config(Config{ShellSockPath: defaults.ShellSockPath}),
 	cell.Invoke(registerShell),
 )
+
+type Config struct {
+	ShellSockPath string
+}
+
+func (def Config) Flags(flags *pflag.FlagSet) {
+	flags.String("shell-sock-path", def.ShellSockPath, "Path to the shell sock.")
+}
 
 // defaultCmdsToInclude specify which default script commands to include.
 // Most of them are for testing, so no need to clutter the shell
@@ -36,7 +47,7 @@ var defaultCmdsToInclude = []string{
 	"cat", "exec", "help",
 }
 
-func registerShell(in hive.ScriptCmds, log *slog.Logger, jg job.Group) {
+func registerShell(in hive.ScriptCmds, log *slog.Logger, jg job.Group, c Config) {
 	cmds := in.Map()
 	defCmds := script.DefaultCmds()
 	for _, name := range defaultCmdsToInclude {
@@ -46,18 +57,19 @@ func registerShell(in hive.ScriptCmds, log *slog.Logger, jg job.Group) {
 		Cmds:  cmds,
 		Conds: nil,
 	}
-	jg.Add(job.OneShot("listener", shell{jg, log, &e}.listener))
+	jg.Add(job.OneShot("listener", shell{jg, log, &e, c.ShellSockPath}.listener))
 }
 
 type shell struct {
 	jg     job.Group
 	log    *slog.Logger
 	engine *script.Engine
+	path   string
 }
 
 func (sh shell) listener(ctx context.Context, health cell.Health) error {
 	// Remove any old UNIX sock file from previous runs.
-	os.Remove(defaults.ShellSockPath)
+	os.Remove(sh.path)
 
 	if _, err := os.Stat(defaults.RuntimePath); os.IsNotExist(err) {
 		if err := os.MkdirAll(defaults.RuntimePath, defaults.RuntimePathRights); err != nil {
@@ -66,9 +78,9 @@ func (sh shell) listener(ctx context.Context, health cell.Health) error {
 	}
 
 	var lc net.ListenConfig
-	l, err := lc.Listen(ctx, "unix", defaults.ShellSockPath)
+	l, err := lc.Listen(ctx, "unix", sh.path)
 	if err != nil {
-		return fmt.Errorf("failed to listen on %q: %w", defaults.ShellSockPath, err)
+		return fmt.Errorf("failed to listen on %q: %w", sh.path, err)
 	}
 
 	var wg sync.WaitGroup
@@ -80,7 +92,7 @@ func (sh shell) listener(ctx context.Context, health cell.Health) error {
 	}()
 	defer wg.Wait()
 
-	health.OK(fmt.Sprintf("Listening on %s", defaults.ShellSockPath))
+	health.OK(fmt.Sprintf("Listening on %s", sh.path))
 	connCount := 0
 	for ctx.Err() == nil {
 		conn, err := l.Accept()

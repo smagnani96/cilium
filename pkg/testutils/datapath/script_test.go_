@@ -1,0 +1,484 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright Authors of Cilium
+
+package datapath
+
+import (
+	"context"
+	"flag"
+	"fmt"
+	"log/slog"
+	"maps"
+	"net"
+	"net/netip"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/cilium/hive/cell"
+	"github.com/cilium/hive/hivetest"
+	"github.com/cilium/hive/job"
+	"github.com/cilium/hive/script"
+	"github.com/cilium/hive/script/scripttest"
+	"github.com/cilium/statedb"
+	"github.com/spf13/afero"
+	"github.com/stretchr/testify/require"
+	"github.com/vishvananda/netlink"
+	"k8s.io/utils/ptr"
+
+	"github.com/cilium/cilium/api/v1/models"
+	cnicell "github.com/cilium/cilium/daemon/cmd/cni"
+	fakecni "github.com/cilium/cilium/daemon/cmd/cni/fake"
+	"github.com/cilium/cilium/daemon/k8s"
+	"github.com/cilium/cilium/operator/metrics"
+	"github.com/cilium/cilium/pkg/bpf"
+	"github.com/cilium/cilium/pkg/cgroups"
+	"github.com/cilium/cilium/pkg/cidr"
+	"github.com/cilium/cilium/pkg/datapath"
+	"github.com/cilium/cilium/pkg/datapath/connector"
+	"github.com/cilium/cilium/pkg/datapath/iptables"
+	"github.com/cilium/cilium/pkg/datapath/linux/bandwidth"
+	linuxConfig "github.com/cilium/cilium/pkg/datapath/linux/config"
+	"github.com/cilium/cilium/pkg/datapath/linux/ipsec"
+	"github.com/cilium/cilium/pkg/datapath/linux/sysctl"
+	"github.com/cilium/cilium/pkg/datapath/loader"
+	"github.com/cilium/cilium/pkg/datapath/orchestrator"
+	"github.com/cilium/cilium/pkg/datapath/prefilter"
+	"github.com/cilium/cilium/pkg/datapath/tables"
+	"github.com/cilium/cilium/pkg/datapath/tunnel"
+	"github.com/cilium/cilium/pkg/datapath/types"
+	"github.com/cilium/cilium/pkg/datapath/xdp"
+	"github.com/cilium/cilium/pkg/endpoint"
+	"github.com/cilium/cilium/pkg/endpoint/creator"
+	"github.com/cilium/cilium/pkg/endpoint/regeneration"
+	"github.com/cilium/cilium/pkg/endpointmanager"
+	"github.com/cilium/cilium/pkg/fqdn/dnsproxy"
+	fqdnproxy "github.com/cilium/cilium/pkg/fqdn/proxy"
+	"github.com/cilium/cilium/pkg/fqdn/rules"
+	"github.com/cilium/cilium/pkg/hive/health"
+	healthTypes "github.com/cilium/cilium/pkg/hive/health/types"
+	"github.com/cilium/cilium/pkg/identity"
+	identitycell "github.com/cilium/cilium/pkg/identity/cache/cell"
+	"github.com/cilium/cilium/pkg/identity/identitymanager"
+	"github.com/cilium/cilium/pkg/ipcache"
+	k8sFakeClient "github.com/cilium/cilium/pkg/k8s/client/testutils"
+	"github.com/cilium/cilium/pkg/k8s/synced"
+	k8sTestutils "github.com/cilium/cilium/pkg/k8s/testutils"
+	"github.com/cilium/cilium/pkg/k8s/version"
+	"github.com/cilium/cilium/pkg/k8s/watchers"
+	"github.com/cilium/cilium/pkg/kpr"
+	"github.com/cilium/cilium/pkg/kvstore"
+	"github.com/cilium/cilium/pkg/labels"
+	"github.com/cilium/cilium/pkg/loadbalancer"
+	"github.com/cilium/cilium/pkg/lock"
+	"github.com/cilium/cilium/pkg/logging"
+	"github.com/cilium/cilium/pkg/maglev"
+	"github.com/cilium/cilium/pkg/maps/act"
+	"github.com/cilium/cilium/pkg/maps/authmap"
+	"github.com/cilium/cilium/pkg/maps/bwmap"
+	"github.com/cilium/cilium/pkg/maps/ctmap"
+	"github.com/cilium/cilium/pkg/maps/egressmap"
+	"github.com/cilium/cilium/pkg/maps/lxcmap"
+	"github.com/cilium/cilium/pkg/maps/nodemap"
+	"github.com/cilium/cilium/pkg/maps/nodemap/fake"
+	"github.com/cilium/cilium/pkg/maps/policymap"
+	"github.com/cilium/cilium/pkg/maps/srv6map"
+	ciliummetrics "github.com/cilium/cilium/pkg/metrics"
+	"github.com/cilium/cilium/pkg/monitor/agent"
+	"github.com/cilium/cilium/pkg/mtu"
+	"github.com/cilium/cilium/pkg/node"
+	"github.com/cilium/cilium/pkg/node/addressing"
+	"github.com/cilium/cilium/pkg/node/manager"
+	nodeTypes "github.com/cilium/cilium/pkg/node/types"
+	"github.com/cilium/cilium/pkg/nodediscovery"
+	"github.com/cilium/cilium/pkg/option"
+	"github.com/cilium/cilium/pkg/policy"
+	policycell "github.com/cilium/cilium/pkg/policy/cell"
+	"github.com/cilium/cilium/pkg/promise"
+	"github.com/cilium/cilium/pkg/proxy"
+	"github.com/cilium/cilium/pkg/testutils"
+	identityTestutils "github.com/cilium/cilium/pkg/testutils/identity"
+	testpolicy "github.com/cilium/cilium/pkg/testutils/policy"
+	"github.com/cilium/cilium/pkg/time"
+	wireguard "github.com/cilium/cilium/pkg/wireguard/agent"
+	wgTypes "github.com/cilium/cilium/pkg/wireguard/types"
+	"github.com/cilium/hive"
+)
+
+var (
+	debug = flag.Bool("debug", false, "Enable debug logging")
+
+	bpfDir string
+
+	localNodeConfig = types.LocalNodeConfiguration{
+		NodeIPv4:            net.ParseIP("192.0.2.3"),
+		CiliumInternalIPv4:  net.ParseIP("192.0.2.3"),
+		AllocCIDRIPv4:       cidr.MustParseCIDR("10.147.0.0/16"),
+		ServiceLoopbackIPv4: net.ParseIP("192.0.2.3"),
+		HostEndpointID:      1,
+		EnableIPv4:          true,
+		DeviceMTU:           1500,
+	}
+)
+
+type fakeProxy struct{}
+
+func (p *fakeProxy) ReinstallRoutingRules(ctx context.Context, mtu int) error {
+	return nil
+}
+
+type params struct {
+	cell.Out
+
+	CNIConfigManager    cnicell.CNIConfigManager
+	Sysctl              sysctl.Sysctl
+	DaemonConfig        *option.DaemonConfig
+	KPRConfig           kpr.KPRConfig
+	TunnelConfig        tunnel.Config
+	MetricsSharedConfig metrics.SharedConfig
+	NodemapV2           nodemap.MapV2
+	Proxy               types.Proxy
+	WGConfig            wgTypes.WireguardConfig
+	PolicyRepo          policy.PolicyRepository
+	MaglevConfig        maglev.Config
+	XDPConfig           xdp.Config
+	//Orchestrator        types.Orchestrator
+	LocalNode node.LocalNode
+}
+
+func TestPrivilegedScript(t *testing.T) {
+	currDir, err := os.Getwd()
+	require.NoError(t, err)
+	bpfDir = filepath.Join(currDir, "..", "..", "..", "bpf")
+
+	t.Cleanup(func() {
+		// Catch any leaked goroutines. Ignoring goroutines possibly left by other tests.
+		leakOpts := testutils.GoleakIgnoreCurrent()
+		testutils.GoleakVerifyNone(t,
+			leakOpts,
+		)
+	})
+
+	tmpDir := "/tmp/Temporary" //t.TempDir()
+	version.Force(k8sTestutils.DefaultVersion)
+
+	var opts []hivetest.LogOption
+	if *debug {
+		opts = append(opts, hivetest.LogLevel(slog.LevelDebug))
+		logging.SetLogLevelToDebug()
+	}
+	log := hivetest.Logger(t, opts...)
+
+	// Due to the kvstore global variables we cannot run these tests in parallel
+	// (scripttest calls t.Parallel()). Use a mutex to serialize the test execution.
+	// Remove this once kvstore globals are removed.
+	var serializeMu lock.Mutex
+
+	setup := func(t testing.TB, args []string) *script.Engine {
+		serializeMu.Lock()
+		t.Cleanup(serializeMu.Unlock)
+
+		require.NoError(t, bpf.MkdirBPF(bpf.TCGlobalsPath()))
+		require.NoError(t, bpf.MkdirBPF(bpf.CiliumPath()))
+		option.Config.BpfDir = bpfDir
+		option.Config.StateDir = tmpDir
+		option.Config.RoutingMode = option.RoutingModeNative
+		option.Config.EnableIPv6 = false
+		option.Config.IPv6NodeAddr = "auto"
+		option.Config.IPv4NodeAddr = "auto"
+		option.Config.IPv4ServiceRange = "auto"
+		option.Config.IPv6ServiceRange = "auto"
+		option.Config.EnableHostLegacyRouting = true
+		option.Config.EnableL7Proxy = false
+		option.Config.AuthMapEntries = option.AuthMapEntriesMin
+
+		require.NoError(t, os.MkdirAll(filepath.Join(option.Config.StateDir, "globals"), 0755))
+		cgroups.CheckOrMountCgrpFS(log, "")
+
+		t.Cleanup(func() {
+			require.NoError(t, os.RemoveAll(bpf.TCGlobalsPath()))
+			require.NoError(t, os.RemoveAll(bpf.CiliumPath()))
+			//require.NoError(t, os.RemoveAll(option.Config.StateDir))
+			option.Config.BpfDir = ""
+			option.Config.StateDir = ""
+		})
+
+		ln := node.LocalNode{
+			Node: nodeTypes.Node{
+				Name: "k8s1",
+				IPAddresses: []nodeTypes.Address{
+					{
+						Type: addressing.NodeInternalIP,
+						IP:   net.ParseIP("192.168.60.11"),
+					},
+					{
+						Type: addressing.NodeCiliumInternalIP,
+						IP:   net.ParseIP("192.168.60.11"),
+					},
+				},
+				Annotations:   map[string]string{},
+				IPv4AllocCIDR: cidr.MustParseCIDR("10.0.0.0/16"),
+			},
+
+			Local: &node.LocalNodeInfo{
+				ServiceLoopbackIPv4: net.ParseIP("127.0.0.1"),
+			},
+		}
+		lns := node.NewTestLocalNodeStore(ln)
+		node.SetTestLocalNodeStore2(lns)
+		prx := &fakeProxy{}
+
+		h := hive.New(
+			loader.Cell,
+			statedb.Cell,
+			job.Cell,
+			health.Cell,
+			mtu.Cell,
+			prefilter.Cell,
+			agent.Cell,
+			k8sFakeClient.FakeClientCell(),
+			linuxConfig.Cell,
+			srv6map.Cell,
+			identitycell.Cell,
+			nodediscovery.Cell,
+			orchestrator.Cell,
+			//endpointmanager.Cell,
+			manager.Cell,
+			creator.Cell,
+			loadbalancer.ConfigCell,
+			act.Cell,
+			k8s.ResourcesCell,
+			authmap.Cell,
+			//k8s.LocalNodeCell,
+			watchers.Cell,
+			synced.Cell,
+			bwmap.Cell,
+			identitymanager.Cell,
+			tables.DirectRoutingDeviceCell,
+			policymap.Cell,
+			bandwidth.Cell,
+			iptables.Cell,
+			egressmap.Cell,
+			ipsec.Cell,
+			metrics.Cell,
+			k8s.NamespaceTableCell,
+			datapath.NodeAddressingCell,
+
+			cell.Provide(
+				func() *node.LocalNodeStore { return lns },
+				cell.NewSimpleHealth,
+				rules.NewDNSRulesService,
+				endpoint.NewEndpointBuildQueue,
+				func() promise.Promise[*option.DaemonConfig] {
+					r, p := promise.New[*option.DaemonConfig]()
+					r.Resolve(option.Config)
+					return p
+				},
+				func() params {
+					return params{
+						CNIConfigManager:    &fakecni.FakeCNIConfigManager{},
+						Sysctl:              sysctl.NewDirectSysctl(afero.NewOsFs(), "/proc"),
+						DaemonConfig:        option.Config,
+						KPRConfig:           kpr.KPRConfig{},
+						TunnelConfig:        tunnel.Config{}, //tunnel.NewTestConfig(tunnel.VXLAN),
+						MetricsSharedConfig: metrics.SharedConfig{},
+						NodemapV2:           fake.NewFakeNodeMapV2(),
+						Proxy:               prx,
+						WGConfig:            wireguard.Config{},
+						MaglevConfig:        maglev.DefaultConfig,
+						XDPConfig:           xdp.Config{},
+						PolicyRepo:          policy.NewPolicyRepository(log, nil, nil, nil, nil, testpolicy.NewPolicyMetricsNoop()),
+						//Orchestrator:        &fakeTypes.FakeOrchestrator{},
+						LocalNode: ln,
+					}
+				},
+				func() endpointmanager.EndpointManager {
+					return endpointmanager.New(log, nil, &dummyEpSyncher{}, nil, nil, nil, endpointmanager.EndpointManagerConfig{})
+				},
+				func() *proxy.Proxy { return nil },
+				func() policycell.IdentityUpdater { return &identityTestutils.IdentityAllocatorOwnerMock{} },
+				func() fqdnproxy.DNSProxier { return &dnsproxy.DNSProxy{} },
+				func() ctmap.GCRunner { return ctmap.NewFakeGCRunner() },
+				func() *ipcache.IPCache {
+					return nil
+				},
+				func(db *statedb.DB) (kvstore.Client, hive.ScriptCmdsOut) {
+					client := kvstore.NewInMemoryClient(db, "__local__")
+					return client, hive.NewScriptCmds(kvstore.Commands(client))
+				},
+				regeneration.NewFence,
+				tables.NewDeviceTable,
+				tables.NewNodeAddressTable,
+				ipcache.NewLocalIPIdentityWatcher,
+				ipcache.NewIPIdentitySynchronizer,
+				statedb.RWTable[*tables.Device].ToTable,
+				statedb.RWTable[tables.NodeAddress].ToTable,
+				statedb.RWTable[tables.Route].ToTable,
+				func(lc cell.Lifecycle, p healthTypes.Provider, jr job.Registry) job.Group {
+					h := p.ForModule(cell.FullModuleID{"test"})
+					return jr.NewGroup(h, lc)
+				},
+
+				func() testing.TB { return t },
+				scriptCommands,
+			),
+		)
+
+		t.Cleanup(func() {
+			require.NoError(t, h.Stop(log, context.TODO()))
+			require.NoError(t, netlink.LinkDel(&netlink.Veth{
+				LinkAttrs: netlink.LinkAttrs{
+					Name: "cilium_host",
+				},
+			}))
+		})
+
+		cmds, err := h.ScriptCommands(log)
+		require.NoError(t, err, "ScriptCommands")
+		maps.Insert(cmds, maps.All(script.DefaultCmds()))
+
+		return &script.Engine{
+			Cmds:             cmds,
+			RetryInterval:    100 * time.Millisecond,
+			MaxRetryInterval: time.Second,
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	t.Cleanup(cancel)
+
+	scripttest.Test(t,
+		ctx,
+		setup,
+		[]string{},
+		"testdata/*.txtar")
+}
+
+func scriptCommands(ld types.Loader, sysctl sysctl.Sysctl, lns *node.LocalNodeStore, orc types.Orchestrator, epMgr endpointmanager.EndpointManager, metricsRegistry *ciliummetrics.Registry, kvstoreClient kvstore.Client, iptablesMgr types.IptablesManager, tunnelCfg tunnel.Config, pr types.Proxy, creator creator.EndpointCreator, allocator identitycell.CachingIdentityAllocator, tb testing.TB) hive.ScriptCmdsOut {
+	return hive.NewScriptCmds(
+		map[string]script.Cmd{
+			"ep/setup": func() script.Cmd {
+				return script.Command(
+					script.CmdUsage{
+						Summary: "Setup the thing",
+						Args:    "",
+						Detail: []string{
+							"",
+						},
+					},
+					func(s *script.State, args ...string) (script.WaitFunc, error) {
+						return func(s *script.State) (stdout string, stderr string, err error) {
+							require.NoError(tb, os.Chdir(option.Config.StateDir))
+
+							allocator.InitIdentityAllocator(nil, kvstoreClient)
+
+							ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+							defer cancel()
+
+							fmt.Println("-----------------------------------")
+							require.NoError(tb, orc.Reinitialize(ctx))
+							fmt.Println("-----------------------------------@@")
+							time.Sleep(10 * time.Second)
+							if err != nil {
+								return
+							}
+
+							tb.Cleanup(func() {
+								err = netlink.LinkDel(&netlink.Veth{
+									LinkAttrs: netlink.LinkAttrs{
+										Name: "lxc_outer",
+									},
+									PeerName: "lxc_inner",
+								})
+								require.NoError(tb, err)
+							})
+							_, _, err = connector.SetupVethWithNames(hivetest.Logger(tb), "lxc_inner", "lxc_outer", connector.LinkConfig{
+								DeviceMTU: 1500,
+							}, sysctl)
+							require.NoError(tb, err)
+
+							var routing = true
+							model := &models.EndpointChangeRequest{
+								ID:            int64(1),
+								State:         ptr.To(models.EndpointState(endpoint.StateWaitingForIdentity)),
+								ContainerName: "ciccio",
+								InterfaceName: "lxc_outer",
+								HostMac:       "11:11:11:11:11:11",
+								//Labels:        models.Labels{labels.LabelHost.String()},
+								DatapathConfiguration: &models.EndpointDatapathConfiguration{
+									DisableSipVerification: true,
+									ExternalIpam:           false,
+									InstallEndpointRoute:   true,
+									RequireArpPassthrough:  false,
+									RequireEgressProg:      true,
+									RequireRouting:         &routing,
+								},
+							}
+
+							ep, err := creator.NewEndpointFromChangeModel(ctx, model)
+							require.NoError(tb, err)
+							ep.IsHost()
+							ep.Start(1)
+							//ep.SetIsHost(true)
+							tb.Cleanup(ep.Stop)
+
+							ep.SetPropertyValue(endpoint.PropertyWithouteBPFDatapath, false)
+							ep.IPv4 = netip.MustParseAddr("10.11.12.13")
+
+							fooLabels := labels.NewLabelsFromSortedList("cidrgroup:name=foo")
+							id, _, err := allocator.AllocateIdentity(ctx, fooLabels, true, identity.InvalidIdentity)
+							require.NoError(tb, err)
+							ep.SetIdentity(id, true)
+
+							err = lxcmap.LXCMap(metricsRegistry).OpenOrCreate()
+							if err != nil {
+								return
+							}
+
+							require.NoError(tb, epMgr.RestoreEndpoint(ep))
+
+							ready := ep.SetState(endpoint.StateWaitingToRegenerate, "test")
+							require.True(tb, ready)
+							regenerationMetadata := &regeneration.ExternalRegenerationMetadata{
+								Reason:            "syncing state to host",
+								RegenerationLevel: regeneration.RegenerateWithDatapath,
+							}
+							buildSuccess := <-ep.Regenerate(regenerationMetadata)
+							require.True(tb, buildSuccess)
+
+							require.NoError(tb, ep.WaitForFirstRegeneration(ctx))
+
+							//prefix := ep.StateDirectoryPath()
+							//require.NoError(tb, os.MkdirAll(prefix, 0755))
+							//headerPath := filepath.Join(prefix, common.CHeaderFileName)
+							//f, err := os.OpenFile(headerPath, os.O_RDWR|os.O_CREATE, 0644)
+							//if err != nil {
+							//	return
+							//}
+							//err = ld.WriteEndpointConfig(f, ep, &localNodeConfig)
+							//if err != nil {
+							//	return
+							//}
+
+							//stats := &metrics.SpanStat{}
+							//hash, err := ld.ReloadDatapath(ctx, ep, &localNodeConfig, stats)
+							//if err != nil {
+							//	return
+							//}
+
+							stdout = fmt.Sprintf("CIAO %s", "")
+							return
+						}, nil
+					},
+				)
+			}(),
+		})
+}
+
+type dummyEpSyncher struct{}
+
+func (epSync *dummyEpSyncher) RunK8sCiliumEndpointSync(e *endpoint.Endpoint, hr cell.Health) {
+}
+
+func (epSync *dummyEpSyncher) DeleteK8sCiliumEndpointSync(e *endpoint.Endpoint) {
+}

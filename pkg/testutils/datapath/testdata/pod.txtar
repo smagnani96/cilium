@@ -1,0 +1,11 @@
+setup infra.yaml
+
+pod example health
+#node-example health
+
+
+-- infra.yaml --
+pods:
+  - name: example
+nodes:
+  - name: example

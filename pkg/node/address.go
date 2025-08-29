@@ -559,6 +559,16 @@ func SetTestLocalNodeStore() {
 	localNode = NewTestLocalNodeStore(LocalNode{})
 }
 
+func SetTestLocalNodeStore2(lns *LocalNodeStore) {
+	if localNode != nil {
+		panic("localNode already set")
+	}
+
+	// Set the localNode global variable temporarily so that the legacy getters
+	// and setters can access it.
+	localNode = lns
+}
+
 func UnsetTestLocalNodeStore() {
 	localNode = nil
 }
