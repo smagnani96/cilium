@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright Authors of Cilium
 
-package cell
+package resolver
 
 import (
 	"math/rand/v2"
@@ -30,7 +30,7 @@ func TestPayloadGetters_GetServiceByAddr(t *testing.T) {
 	fes.Insert(wtxn, &loadbalancer.Frontend{FrontendParams: loadbalancer.FrontendParams{Address: addrUDP, ServiceName: svcNameUDP}})
 	wtxn.Commit()
 
-	pg := payloadGetters{db: db, frontends: fes}
+	pg := ServiceGetter{db: db, frontends: fes}
 
 	svc := pg.GetServiceByAddr(addrTCP.Addr(), 80)
 	require.NotNil(t, svc)
@@ -50,10 +50,10 @@ func BenchmarkGetServiceByAddr(b *testing.B) {
 	db := statedb.New()
 	fes, err := loadbalancer.NewFrontendsTable(loadbalancer.DefaultConfig, db)
 	require.NoError(b, err)
-	pg := payloadGetters{db: db, frontends: fes}
+	pg := ServiceGetter{db: db, frontends: fes}
 
 	b.ResetTimer()
-	for b.Loop() {
+	for i := 0; i < b.N; i++ {
 		addr, port := randomAddrPort()
 		svc := pg.GetServiceByAddr(addr, port)
 		if svc != nil {
