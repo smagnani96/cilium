@@ -16,10 +16,9 @@ import (
 
 	pb "github.com/cilium/cilium/api/v1/flow"
 	"github.com/cilium/cilium/pkg/byteorder"
-	"github.com/cilium/cilium/pkg/hubble/parser/common"
 	"github.com/cilium/cilium/pkg/hubble/parser/errors"
-	"github.com/cilium/cilium/pkg/hubble/parser/getters"
 	"github.com/cilium/cilium/pkg/hubble/parser/options"
+	resolverTypes "github.com/cilium/cilium/pkg/hubble/resolver/types"
 	"github.com/cilium/cilium/pkg/lock"
 	"github.com/cilium/cilium/pkg/monitor"
 	monitorAPI "github.com/cilium/cilium/pkg/monitor/api"
@@ -30,12 +29,12 @@ import (
 // Parser is a parser for L3/L4 payloads
 type Parser struct {
 	log            *slog.Logger
-	endpointGetter getters.EndpointGetter
-	identityGetter getters.IdentityGetter
-	dnsGetter      getters.DNSGetter
-	ipGetter       getters.IPGetter
-	serviceGetter  getters.ServiceGetter
-	linkGetter     getters.LinkGetter
+	endpointGetter resolverTypes.EndpointGetter
+	identityGetter resolverTypes.IdentityGetter
+	dnsGetter      resolverTypes.DNSGetter
+	ipGetter       resolverTypes.IPGetter
+	serviceGetter  resolverTypes.ServiceGetter
+	linkGetter     resolverTypes.LinkGetter
 
 	dropNotifyDecoder          options.DropNotifyDecoderFunc
 	traceNotifyDecoder         options.TraceNotifyDecoderFunc
@@ -43,7 +42,6 @@ type Parser struct {
 	debugCaptureDecoder        options.DebugCaptureDecoderFunc
 	packetDecoder              options.L34PacketDecoder
 
-	epResolver          *common.EndpointResolver
 	correlateL3L4Policy bool
 }
 
@@ -93,12 +91,12 @@ type packetDecoder struct {
 // New returns a new L3/L4 parser
 func New(
 	log *slog.Logger,
-	endpointGetter getters.EndpointGetter,
-	identityGetter getters.IdentityGetter,
-	dnsGetter getters.DNSGetter,
-	ipGetter getters.IPGetter,
-	serviceGetter getters.ServiceGetter,
-	linkGetter getters.LinkGetter,
+	endpointGetter resolverTypes.EndpointGetter,
+	identityGetter resolverTypes.IdentityGetter,
+	dnsGetter resolverTypes.DNSGetter,
+	ipGetter resolverTypes.IPGetter,
+	serviceGetter resolverTypes.ServiceGetter,
+	linkGetter resolverTypes.LinkGetter,
 	opts ...options.Option,
 ) (*Parser, error) {
 	packet := &packetDecoder{}
@@ -169,7 +167,6 @@ func New(
 		debugCaptureDecoder:        args.DebugCaptureDecoder,
 		traceNotifyDecoder:         args.TraceNotifyDecoder,
 		policyVerdictNotifyDecoder: args.PolicyVerdictNotifyDecoder,
-		epResolver:                 common.NewEndpointResolver(log, endpointGetter, identityGetter, ipGetter),
 		packetDecoder:              args.L34PacketDecoder,
 		correlateL3L4Policy:        args.EnableNetworkPolicyCorrelation,
 	}, nil
@@ -267,15 +264,15 @@ func (p *Parser) Decode(data []byte, decoded *pb.Flow) error {
 	}
 
 	srcLabelID, dstLabelID := decodeSecurityIdentities(dn, tn, pvn)
-	datapathContext := common.DatapathContext{
+	datapathContext := resolverTypes.DatapathContext{
 		SrcIP:                 srcIP,
 		SrcLabelID:            srcLabelID,
 		DstIP:                 dstIP,
 		DstLabelID:            dstLabelID,
 		TraceObservationPoint: decoded.TraceObservationPoint,
 	}
-	srcEndpoint := p.epResolver.ResolveEndpoint(srcIP, srcLabelID, datapathContext)
-	dstEndpoint := p.epResolver.ResolveEndpoint(dstIP, dstLabelID, datapathContext)
+	srcEndpoint := p.endpointGetter.ResolveEndpoint(srcIP, srcLabelID, datapathContext)
+	dstEndpoint := p.endpointGetter.ResolveEndpoint(dstIP, dstLabelID, datapathContext)
 	var sourceService, destinationService *pb.Service
 	if p.serviceGetter != nil {
 		sourceService = p.serviceGetter.GetServiceByAddr(srcIP, srcPort)
