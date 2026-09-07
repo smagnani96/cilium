@@ -1683,6 +1683,24 @@ func TestGetConntrackEntries(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "node filter only dials the matching peer",
+			plr:  &testutils.FakePeerLister{OnList: peers},
+			ocb:  onClientFor("two"),
+			req:  &observerpb.GetConntrackEntriesRequest{NodeName: "one"},
+			want: want{
+				entries: []*observerpb.GetConntrackEntriesResponse{
+					{NodeName: "one"},
+				},
+			},
+		},
+		{
+			name: "node filter matching no peer dials nobody",
+			plr:  &testutils.FakePeerLister{OnList: peers},
+			ocb:  onClientFor("one", "two"),
+			req:  &observerpb.GetConntrackEntriesRequest{NodeName: "unknown"},
+			want: want{entries: nil},
+		},
 	}
 
 	for _, tt := range tests {

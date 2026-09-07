@@ -178,6 +178,7 @@ GetAgentEventsResponse contains an event received from the Cilium agent.
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
 | number | [uint64](#uint64) |  | Maximum number of entries that should be returned. 0 means no limit. |
+| node_name | [string](#string) |  | node_name, if set, restricts the dump to the node with this name. |
 
 
 

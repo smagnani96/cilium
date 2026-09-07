@@ -287,6 +287,8 @@ message Namespace {
 message GetConntrackEntriesRequest {
     // Maximum number of entries that should be returned. 0 means no limit.
     uint64 number = 1;
+    // node_name, if set, restricts the dump to the node with this name.
+    string node_name = 2;
 }
 
 // GetConntrackEntriesResponse contains either a single conntrack entry read
