@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/netip"
 	"sync/atomic"
+	"time"
 
 	"github.com/cilium/cilium/pkg/byteorder"
 	"github.com/cilium/cilium/pkg/hubble/mapexporter/common"
@@ -27,6 +28,11 @@ import (
 var (
 	ErrExporterEnrichmentDisabled        = fmt.Errorf("conntrack enrichment is disabled")
 	ErrExporterRequestEnrichmentDisabled = fmt.Errorf("cannot apply enriched filter on a non-enriched request")
+)
+
+const (
+	cacheSize = 100000
+	cacheTTL  = 60 * time.Second
 )
 
 type ConntrackExporter struct {
@@ -63,9 +69,9 @@ func newConntrackExporter(
 		cfg:           cfg,
 		ctMaps:        ctMaps,
 		logger:        log,
-		epGetter:      epGetter,
-		svcGetter:     svcGetter,
-		nodeGetter:    nodeGetter,
+		epGetter:      NewCachedEndpointResolver(epGetter, cacheSize, cacheTTL),
+		svcGetter:     NewCachedServiceGetter(svcGetter, cacheSize, cacheTTL),
+		nodeGetter:    NewCachedNodeGetter(nodeGetter, cacheSize, cacheTTL),
 		clock:         clock,
 		ctRateLimiter: rateLimiter,
 	}
