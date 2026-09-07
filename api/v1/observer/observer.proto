@@ -37,6 +37,12 @@ service Observer {
 
     // ServerStatus returns some details about the running hubble server.
     rpc ServerStatus(ServerStatusRequest) returns (ServerStatusResponse) {}
+
+    // GetConntrackEntries returns the connection tracking entries currently
+    // present in the node's datapath conntrack maps. Because the underlying
+    // maps are LRU-based, the result is a best-effort snapshot: entries may
+    // be evicted or added while it is being produced.
+    rpc GetConntrackEntries(GetConntrackEntriesRequest) returns (stream GetConntrackEntriesResponse) {}
 }
 
 message ServerStatusRequest {}
@@ -276,6 +282,91 @@ message GetNamespacesResponse {
 message Namespace {
   string cluster = 1;
   string namespace = 2;
+}
+
+message GetConntrackEntriesRequest {
+    // Maximum number of entries that should be returned. 0 means no limit.
+    uint64 number = 1;
+}
+
+// GetConntrackEntriesResponse contains either a single conntrack entry read
+// from the node's datapath conntrack maps, or a status update about one of
+// the nodes participating in the request.
+message GetConntrackEntriesResponse {
+    oneof response_types {
+        ConntrackEntry entry = 1;
+        // node_status informs clients about the state of the nodes
+        // participating in this particular GetConntrackEntries request. Only
+        // sent by Hubble Relay, e.g. when a node's own GetConntrackEntries
+        // call failed (see relay.NodeState.NODE_ERROR).
+        relay.NodeStatusEvent node_status = 2;
+    }
+    // Name of the node where this entry was observed.
+    string node_name = 1000;
+    // Timestamp at which this entry was read from the datapath.
+    google.protobuf.Timestamp time = 1001;
+}
+
+// ConntrackEntry is an entry from a node's datapath conntrack
+// map (see pkg/maps/ctmap).
+message ConntrackEntry {
+    string source_ip = 1;
+    string destination_ip = 2;
+    uint32 source_port = 3;
+    uint32 destination_port = 4;
+    // IP protocol number (e.g. 6 for TCP, 17 for UDP).
+    uint32 protocol = 5;
+    flow.TrafficDirection direction = 6;
+    uint64 packets = 7;
+    uint64 bytes = 8;
+    // expires_at is the wall-clock time at which this entry is expected to
+    // expire. The datapath itself only records this in kernel-clock units
+    // local to this node (see pkg/maps/timestamp) with no shared reference
+    // an external reader could interpret, so it's converted to wall-clock
+    // time here, using this node's clock source at read time. Unset if the
+    // conversion failed.
+    google.protobuf.Timestamp expires_at = 9;
+    // flags carried by this entry, decoded from struct ct_entry's flags
+    // bitfield (bpf/lib/conntrack.h).
+    ConntrackEntryFlags flags = 10;
+    // tcp holds TCP-specific state. Unset for non-TCP entries
+    // (see struct ct_entry in bpf/lib/conntrack.h).
+    ConntrackEntryTCP tcp = 11;
+    // last_tx_report_at/last_rx_report_at are the wall-clock times of the
+    // last transmit/receive TCP flag report for this entry, converted the
+    // same way as expires_at. Unset if the conversion failed.
+    google.protobuf.Timestamp last_tx_report_at = 12;
+    google.protobuf.Timestamp last_rx_report_at = 13;
+    // related reports whether this entry belongs to a connection related to
+    // another one (e.g. an ICMP error referencing a different connection).
+    bool related = 14;
+    // service_entry reports whether this entry's tuple was recorded for a
+    // load-balanced service connection.
+    bool service_entry = 15;
+}
+
+// ConntrackEntryTCP holds TCP-specific per-connection state, only set on
+// ConntrackEntry.tcp for entries with protocol == TCP.
+message ConntrackEntryTCP {
+    // tx_flags_seen/rx_flags_seen are the bitwise-OR of every TCP flags byte
+    // seen on transmit/receive for this connection (see struct ct_entry in
+    // bpf/lib/conntrack.h).
+    uint32 tx_flags_seen = 1;
+    uint32 rx_flags_seen = 2;
+}
+
+// ConntrackEntryFlags exposes struct ct_entry's per-connection state flags
+// (bpf/lib/conntrack.h) as named booleans.
+message ConntrackEntryFlags {
+    bool rx_closing = 1;
+    bool tx_closing = 2;
+    bool lb_loopback = 3;
+    bool seen_non_syn = 4;
+    bool node_port = 5;
+    bool proxy_redirect = 6;
+    bool dsr_internal = 7;
+    bool from_l7lb = 8;
+    bool from_tunnel = 9;
 }
 
 // ExportEvent contains an event to be exported. Not to be used outside of the

@@ -55,6 +55,15 @@ func (m *CtMockMap) DumpWithCallback(cb bpf.DumpCallback) error {
 	return nil
 }
 
+func (m *CtMockMap) DumpEntries(_ context.Context, cb func(ctmap.CtKey, *ctmap.CtEntry) bool) error {
+	for _, e := range m.Entries {
+		if !cb(e.Key, &e.Value) {
+			break
+		}
+	}
+	return nil
+}
+
 // Count returns the length of the map entries.
 func (m *CtMockMap) Count(_ context.Context) (int, error) {
 	return len(m.Entries), nil

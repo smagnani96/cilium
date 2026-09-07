@@ -96,6 +96,7 @@ type CtMap interface {
 	Open() error
 	Close() error
 	Path() (string, error)
+	DumpEntries(ctx context.Context, cb func(CtKey, *CtEntry) bool) error
 	DumpEntriesWithTimeDiff(clockSource *models.ClockSource) (string, error)
 	DumpWithCallback(bpf.DumpCallback) error
 	Count(context.Context) (int, error)
@@ -432,6 +433,7 @@ func (m *Map) doGCForFamily(filter GCFilter, next4, next6 func(GCEvent), ipv6 bo
 		}
 	}
 
+	ctx := context.Background()
 	stats := statStartGc(m)
 	defer stats.finish()
 
@@ -443,11 +445,12 @@ func (m *Map) doGCForFamily(filter GCFilter, next4, next6 func(GCEvent), ipv6 bo
 	globalDeleteLock[m.mapType].Lock()
 	if ipv6 {
 		filterCallback := m.cleanup(filter, natMap, &stats, next6, ipv6)
-		stats.dumpError = iterate[CtKey6Global, CtEntry](m, &stats, filterCallback)
+		stats.dumpError = iterate[CtKey6Global, CtEntry](ctx, m, filterCallback)
 	} else {
 		filterCallback := m.cleanup(filter, natMap, &stats, next4, ipv6)
-		stats.dumpError = iterate[CtKey4Global, CtEntry](m, &stats, filterCallback)
+		stats.dumpError = iterate[CtKey4Global, CtEntry](ctx, m, filterCallback)
 	}
+	stats.Completed = true
 	globalDeleteLock[m.mapType].Unlock()
 
 	return stats
@@ -475,14 +478,26 @@ func (m *Map) purgeCtEntry(key CtKey, entry *CtEntry, natMap *nat.Map, next func
 	return nil
 }
 
-func iterate[KT any, VT any, KP bpf.KeyPointer[KT], VP bpf.ValuePointer[VT]](m *Map, stats *gcStats, filterCallback func(key bpf.MapKey, value bpf.MapValue)) error {
-	ctx := context.Background()
+func iterate[KT any, VT any, KP bpf.KeyPointer[KT], VP bpf.ValuePointer[VT]](ctx context.Context, m *Map, filterCallback func(key bpf.MapKey, value bpf.MapValue)) error {
 	iter := bpf.NewBatchIterator[KT, VT, KP, VP](&m.Map)
 	for k, v := range iter.IterateAll(ctx) {
 		filterCallback(k, v)
 	}
-	stats.Completed = true
 	return iter.Err()
+}
+
+// DumpEntries walks the map invoking cb for every entry. Unlike GC's doGCForFamily,
+// DumpEntries never takes globalDeleteLock: it only reads, so it's safe to run
+// concurrently with GC. Because the underlying map is an LRU hash, the result
+// is a best-effort snapshot (entries may change while the walk is in progress).
+func (m *Map) DumpEntries(ctx context.Context, cb func(CtKey, *CtEntry) bool) error {
+	wrap := func(key bpf.MapKey, value bpf.MapValue) {
+		cb(key.(CtKey), value.(*CtEntry))
+	}
+	if m.mapType.isIPv6() {
+		return iterate[CtKey6Global, CtEntry](ctx, m, wrap)
+	}
+	return iterate[CtKey4Global, CtEntry](ctx, m, wrap)
 }
 
 var _ tupleKeyAccessor = &tuple.TupleKey4{}
