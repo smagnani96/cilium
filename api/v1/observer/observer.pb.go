@@ -1755,10 +1755,15 @@ type ConntrackEntry struct {
 	// and are therefore authoritative regardless of which side of a NAT'd
 	// connection the raw tuple currently represents.
 	// Unset if the corresponding ID is 0 or could not be resolved.
-	Service       *flow.Service  `protobuf:"bytes,18,opt,name=service,proto3" json:"service,omitempty"`
-	Backend       *flow.Endpoint `protobuf:"bytes,19,opt,name=backend,proto3" json:"backend,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Service *flow.Service  `protobuf:"bytes,18,opt,name=service,proto3" json:"service,omitempty"`
+	Backend *flow.Endpoint `protobuf:"bytes,19,opt,name=backend,proto3" json:"backend,omitempty"`
+	// source_node_name/destination_node_name are the name of the cluster
+	// node (not a pod) that source_ip/destination_ip belongs to. Unset if the
+	// address isn't a known node's IP (e.g. it's a pod or an external address).
+	SourceNodeName      string `protobuf:"bytes,20,opt,name=source_node_name,json=sourceNodeName,proto3" json:"source_node_name,omitempty"`
+	DestinationNodeName string `protobuf:"bytes,21,opt,name=destination_node_name,json=destinationNodeName,proto3" json:"destination_node_name,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *ConntrackEntry) Reset() {
@@ -1922,6 +1927,20 @@ func (x *ConntrackEntry) GetBackend() *flow.Endpoint {
 		return x.Backend
 	}
 	return nil
+}
+
+func (x *ConntrackEntry) GetSourceNodeName() string {
+	if x != nil {
+		return x.SourceNodeName
+	}
+	return ""
+}
+
+func (x *ConntrackEntry) GetDestinationNodeName() string {
+	if x != nil {
+		return x.DestinationNodeName
+	}
+	return ""
 }
 
 // ConntrackEntryTCP holds TCP-specific per-connection state, only set on
@@ -2387,7 +2406,7 @@ const file_observer_observer_proto_rawDesc = "" +
 	"nodeStatus\x12\x1c\n" +
 	"\tnode_name\x18\xe8\a \x01(\tR\bnodeName\x12/\n" +
 	"\x04time\x18\xe9\a \x01(\v2\x1a.google.protobuf.TimestampR\x04timeB\x10\n" +
-	"\x0eresponse_types\"\xbb\x06\n" +
+	"\x0eresponse_types\"\x99\a\n" +
 	"\x0eConntrackEntry\x12\x1b\n" +
 	"\tsource_ip\x18\x01 \x01(\tR\bsourceIp\x12%\n" +
 	"\x0edestination_ip\x18\x02 \x01(\tR\rdestinationIp\x12\x1f\n" +
@@ -2410,7 +2429,9 @@ const file_observer_observer_proto_rawDesc = "" +
 	"\x06source\x18\x10 \x01(\v2\x0e.flow.EndpointR\x06source\x120\n" +
 	"\vdestination\x18\x11 \x01(\v2\x0e.flow.EndpointR\vdestination\x12'\n" +
 	"\aservice\x18\x12 \x01(\v2\r.flow.ServiceR\aservice\x12(\n" +
-	"\abackend\x18\x13 \x01(\v2\x0e.flow.EndpointR\abackend\"[\n" +
+	"\abackend\x18\x13 \x01(\v2\x0e.flow.EndpointR\abackend\x12(\n" +
+	"\x10source_node_name\x18\x14 \x01(\tR\x0esourceNodeName\x122\n" +
+	"\x15destination_node_name\x18\x15 \x01(\tR\x13destinationNodeName\"[\n" +
 	"\x11ConntrackEntryTCP\x12\"\n" +
 	"\rtx_flags_seen\x18\x01 \x01(\rR\vtxFlagsSeen\x12\"\n" +
 	"\rrx_flags_seen\x18\x02 \x01(\rR\vrxFlagsSeen\"\xbb\x02\n" +

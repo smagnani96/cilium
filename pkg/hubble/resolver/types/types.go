@@ -94,3 +94,8 @@ type EndpointInfo interface {
 	GetPod() *slim_corev1.Pod
 	GetPolicyCorrelationInfoForKey(key policyTypes.Key) (policyTypes.PolicyCorrelationInfo, bool)
 }
+
+type NodeGetter interface {
+	// GetNodeNameByIP returns the name of the node with the given IP address, if it exists.
+	GetNodeNameByIP(ip netip.Addr) string
+}

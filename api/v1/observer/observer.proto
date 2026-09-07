@@ -357,6 +357,12 @@ message ConntrackEntry {
     // Unset if the corresponding ID is 0 or could not be resolved.
     flow.Service service = 18;
     flow.Endpoint backend = 19;
+
+    // source_node_name/destination_node_name are the name of the cluster
+    // node (not a pod) that source_ip/destination_ip belongs to. Unset if the
+    // address isn't a known node's IP (e.g. it's a pod or an external address).
+    string source_node_name = 20;
+    string destination_node_name = 21;
 }
 
 // ConntrackEntryTCP holds TCP-specific per-connection state, only set on

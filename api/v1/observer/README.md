@@ -68,6 +68,8 @@ map (see pkg/maps/ctmap).
 | destination | [flow.Endpoint](#flow-Endpoint) |  |  |
 | service | [flow.Service](#flow-Service) |  | service and backend are resolved from rev_nat_index/backend_id, and are therefore authoritative regardless of which side of a NAT&#39;d connection the raw tuple currently represents. Unset if the corresponding ID is 0 or could not be resolved. |
 | backend | [flow.Endpoint](#flow-Endpoint) |  |  |
+| source_node_name | [string](#string) |  | source_node_name/destination_node_name are the name of the cluster node (not a pod) that source_ip/destination_ip belongs to. Unset if the address isn&#39;t a known node&#39;s IP (e.g. it&#39;s a pod or an external address). |
+| destination_node_name | [string](#string) |  |  |
 
 
 
