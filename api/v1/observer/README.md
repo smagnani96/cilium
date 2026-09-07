@@ -66,6 +66,8 @@ map (see pkg/maps/ctmap).
 | service_entry | [bool](#bool) |  | service_entry reports whether this entry&#39;s tuple was recorded for a load-balanced service connection. |
 | source | [flow.Endpoint](#flow-Endpoint) |  | source/destination are resolved from Cilium&#39;s identity/endpoint state at read time. Unset if the resolution failed. |
 | destination | [flow.Endpoint](#flow-Endpoint) |  |  |
+| service | [flow.Service](#flow-Service) |  | service and backend are resolved from rev_nat_index/backend_id, and are therefore authoritative regardless of which side of a NAT&#39;d connection the raw tuple currently represents. Unset if the corresponding ID is 0 or could not be resolved. |
+| backend | [flow.Endpoint](#flow-Endpoint) |  |  |
 
 
 
