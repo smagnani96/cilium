@@ -7,6 +7,7 @@ import (
 	"context"
 	"log/slog"
 	"net/netip"
+	"sync/atomic"
 
 	"github.com/cilium/cilium/pkg/hubble/mapexporter/common"
 	"github.com/cilium/cilium/pkg/maps/ctmap"
@@ -21,7 +22,8 @@ type ConntrackExporter struct {
 	ctMaps ctmap.CTMaps
 	logger *slog.Logger
 
-	clock common.BPFClock
+	clock    common.BPFClock
+	inFlight atomic.Bool
 }
 
 func newConntrackExporter(
@@ -49,6 +51,10 @@ func (c *ConntrackExporter) GetConntrackEntries(ctx context.Context, req *observ
 	if c == nil || !c.cfg.EnableConntrack {
 		return common.ErrExporterDisabled
 	}
+	if !c.inFlight.CompareAndSwap(false, true) {
+		return common.ErrExportInProgress
+	}
+	defer c.inFlight.Store(false)
 
 	var n uint64
 
