@@ -64,6 +64,8 @@ map (see pkg/maps/ctmap).
 | last_rx_report_at | [google.protobuf.Timestamp](#google-protobuf-Timestamp) |  |  |
 | related | [bool](#bool) |  | related reports whether this entry belongs to a connection related to another one (e.g. an ICMP error referencing a different connection). |
 | service_entry | [bool](#bool) |  | service_entry reports whether this entry&#39;s tuple was recorded for a load-balanced service connection. |
+| source | [flow.Endpoint](#flow-Endpoint) |  | source/destination are resolved from Cilium&#39;s identity/endpoint state at read time. Unset if the resolution failed. |
+| destination | [flow.Endpoint](#flow-Endpoint) |  |  |
 
 
 

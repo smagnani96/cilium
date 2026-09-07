@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 
 	"github.com/cilium/cilium/pkg/hubble/mapexporter/common"
+	resolverTypes "github.com/cilium/cilium/pkg/hubble/resolver/types"
 	"github.com/cilium/cilium/pkg/maps/ctmap"
 	"github.com/cilium/cilium/pkg/rate"
 	"github.com/cilium/cilium/pkg/u8proto"
@@ -19,9 +20,10 @@ import (
 )
 
 type ConntrackExporter struct {
-	cfg    Config
-	ctMaps ctmap.CTMaps
-	logger *slog.Logger
+	cfg      Config
+	ctMaps   ctmap.CTMaps
+	logger   *slog.Logger
+	epGetter resolverTypes.EndpointGetter
 
 	clock         common.BPFClock
 	inFlight      atomic.Bool
@@ -32,6 +34,7 @@ func newConntrackExporter(
 	cfg Config,
 	ctMaps ctmap.CTMaps,
 	log *slog.Logger,
+	epGetter resolverTypes.EndpointGetter,
 ) *ConntrackExporter {
 	clock, err := common.NewBPFClock()
 	if err != nil {
@@ -46,6 +49,7 @@ func newConntrackExporter(
 		cfg:           cfg,
 		ctMaps:        ctMaps,
 		logger:        log,
+		epGetter:      epGetter,
 		clock:         clock,
 		ctRateLimiter: rateLimiter,
 	}
@@ -70,7 +74,7 @@ func (c *ConntrackExporter) GetConntrackEntries(ctx context.Context, req *observ
 
 	for _, m := range c.ctMaps.ActiveMaps() {
 		err := m.DumpEntries(ctx, func(key ctmap.CtKey, val *ctmap.CtEntry) bool {
-			if !yield(ctEntryToProto(key, val, c.clock)) {
+			if !yield(ctEntryToProto(key, val, c.clock, c.cfg.EnableConntrackEnrichment, c.epGetter)) {
 				return false
 			}
 			n++
@@ -89,6 +93,8 @@ func ctEntryToProto(
 	key ctmap.CtKey,
 	entry *ctmap.CtEntry,
 	clock common.BPFClock,
+	enrich bool,
+	epGetter resolverTypes.EndpointGetter,
 ) *observerpb.ConntrackEntry {
 	e := &observerpb.ConntrackEntry{
 		Packets:        entry.Packets,
@@ -137,6 +143,19 @@ func ctEntryToProto(
 	}
 	e.Related = tupleFlags&ctmap.TUPLE_F_RELATED != 0
 	e.ServiceEntry = tupleFlags&ctmap.TUPLE_F_SERVICE != 0
+
+	// If enrichment is not requested, return early.
+	if !enrich {
+		return e
+	}
+
+	// Empty datapath context. We resolve purely by using the legit
+	// source identity and destination address.
+	dpContext := resolverTypes.DatapathContext{}
+	if epGetter != nil {
+		e.Source = epGetter.ResolveEndpoint(srcAddr, 0, dpContext)
+		e.Destination = epGetter.ResolveEndpoint(dstAddr, entry.SourceSecurityID, dpContext)
+	}
 
 	return e
 }

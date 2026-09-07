@@ -4,6 +4,7 @@
 package conntrack
 
 import (
+	"net/netip"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -13,6 +14,8 @@ import (
 	observerpb "github.com/cilium/cilium/api/v1/observer"
 	"github.com/cilium/cilium/pkg/byteorder"
 	"github.com/cilium/cilium/pkg/hubble/mapexporter/common"
+	resolverTypes "github.com/cilium/cilium/pkg/hubble/resolver/types"
+	"github.com/cilium/cilium/pkg/hubble/testutils"
 	"github.com/cilium/cilium/pkg/maps/ctmap"
 	"github.com/cilium/cilium/pkg/time"
 	"github.com/cilium/cilium/pkg/tuple"
@@ -25,6 +28,8 @@ var (
 	txReportDiff = int64(-10)
 	lifetimeDiff = int64(+50)
 	clock        = common.BPFClock{Now: time.Unix(1700000000, 0), NowCTSec: 1000, Converter: func(t uint64) uint64 { return t }}
+	sPodName     = "source-pod"
+	dPodName     = "destination-pod"
 	key4         = &ctmap.CtKey4Global{
 		TupleKey4Global: tuple.TupleKey4Global{
 			TupleKey4: tuple.TupleKey4{
@@ -69,19 +74,19 @@ func (m *mockCTMaps) ActiveMaps() []*ctmap.Map {
 }
 
 func TestConntrackExporter_API(t *testing.T) {
-	c := newConntrackExporter(Config{EnableConntrack: true, ConntrackRateLimit: 30 * time.Second}, &mockCTMaps{}, hivetest.Logger(t))
+	c := newConntrackExporter(Config{EnableConntrack: true, ConntrackRateLimit: 30 * time.Second}, &mockCTMaps{}, hivetest.Logger(t), nil)
 	err := c.GetConntrackEntries(t.Context(), &observerpb.GetConntrackEntriesRequest{}, nil)
 	require.Nil(t, err)
 
 	err = c.GetConntrackEntries(t.Context(), &observerpb.GetConntrackEntriesRequest{}, nil)
 	require.ErrorIs(t, err, common.ErrExportRateLimitExceeded)
 
-	c = newConntrackExporter(Config{EnableConntrack: true, ConntrackRateLimit: 30 * time.Second}, &mockCTMaps{}, hivetest.Logger(t))
+	c = newConntrackExporter(Config{EnableConntrack: true, ConntrackRateLimit: 30 * time.Second}, &mockCTMaps{}, hivetest.Logger(t), nil)
 	c.inFlight.Store(true)
 	err = c.GetConntrackEntries(t.Context(), &observerpb.GetConntrackEntriesRequest{}, nil)
 	require.ErrorIs(t, err, common.ErrExportInProgress)
 
-	c = newConntrackExporter(Config{EnableConntrack: false, ConntrackRateLimit: 30 * time.Second}, &mockCTMaps{}, hivetest.Logger(t))
+	c = newConntrackExporter(Config{EnableConntrack: false, ConntrackRateLimit: 30 * time.Second}, &mockCTMaps{}, hivetest.Logger(t), nil)
 	err = c.GetConntrackEntries(t.Context(), &observerpb.GetConntrackEntriesRequest{}, nil)
 	require.ErrorIs(t, err, common.ErrExporterDisabled)
 }
@@ -122,7 +127,23 @@ func TestConntrackExporter_Conversion(t *testing.T) {
 			isTCP = key.NextHeader == u8proto.TCP
 		}
 
-		got := ctEntryToProto(s.key, entry, clock)
+		epGetter := &testutils.FakeEndpointGetter{
+			OnResolveEndpoint: func(ip netip.Addr, datapathSecurityIdentity uint32, context resolverTypes.DatapathContext) *flowpb.Endpoint {
+				if ip.String() == saddr {
+					return &flowpb.Endpoint{
+						PodName: sPodName,
+					}
+				}
+				if datapathSecurityIdentity == entry.SourceSecurityID || ip.String() == daddr {
+					return &flowpb.Endpoint{
+						PodName: dPodName,
+					}
+				}
+				return nil
+			},
+		}
+
+		got := ctEntryToProto(s.key, entry, clock, true, epGetter)
 		require.NotNil(t, got)
 
 		assert.Equal(t, saddr, got.SourceIp)
@@ -158,5 +179,14 @@ func TestConntrackExporter_Conversion(t *testing.T) {
 		} else {
 			require.Nil(t, got.Tcp)
 		}
+
+		require.NotNil(t, got.Source)
+		assert.Equal(t, sPodName, got.Source.PodName)
+		require.NotNil(t, got.Destination)
+		assert.Equal(t, dPodName, got.Destination.PodName)
+
+		got = ctEntryToProto(s.key, entry, clock, false, epGetter)
+		require.Nil(t, got.Source)
+		require.Nil(t, got.Destination)
 	}
 }
