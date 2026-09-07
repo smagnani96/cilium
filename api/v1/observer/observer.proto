@@ -289,6 +289,10 @@ message GetConntrackEntriesRequest {
     uint64 number = 1;
     // node_name, if set, restricts the dump to the node with this name.
     string node_name = 2;
+    // enrich requests identity, namespace, pod name, service, and node-name
+    // enrichment for the returned entries. Has no effect if the agent's own
+    // hubble-enable-conntrack-enrichment flag is disabled. Defaults to false.
+    bool enrich = 3;
 }
 
 // GetConntrackEntriesResponse contains either a single conntrack entry read

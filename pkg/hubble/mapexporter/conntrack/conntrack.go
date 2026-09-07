@@ -6,6 +6,7 @@ package conntrack
 import (
 	"context"
 	"encoding/binary"
+	"fmt"
 	"log/slog"
 	"net/netip"
 	"sync/atomic"
@@ -21,6 +22,10 @@ import (
 
 	flowpb "github.com/cilium/cilium/api/v1/flow"
 	observerpb "github.com/cilium/cilium/api/v1/observer"
+)
+
+var (
+	ErrExporterEnrichmentDisabled = fmt.Errorf("conntrack enrichment is disabled")
 )
 
 type ConntrackExporter struct {
@@ -72,6 +77,9 @@ func (c *ConntrackExporter) GetConntrackEntries(ctx context.Context, req *observ
 	if c == nil || !c.cfg.EnableConntrack {
 		return common.ErrExporterDisabled
 	}
+	if req.GetEnrich() && !c.cfg.EnableConntrackEnrichment {
+		return ErrExporterEnrichmentDisabled
+	}
 	if !c.inFlight.CompareAndSwap(false, true) {
 		return common.ErrExportInProgress
 	}
@@ -86,7 +94,7 @@ func (c *ConntrackExporter) GetConntrackEntries(ctx context.Context, req *observ
 			break
 		}
 		err := m.DumpEntries(ctx, func(key ctmap.CtKey, val *ctmap.CtEntry) bool {
-			if !yield(ctEntryToProto(key, val, c.clock, c.cfg.EnableConntrackEnrichment, c.epGetter, c.svcGetter, c.nodeGetter)) {
+			if !yield(ctEntryToProto(key, val, c.clock, req.GetEnrich() && c.cfg.EnableConntrackEnrichment, c.epGetter, c.svcGetter, c.nodeGetter)) {
 				return false
 			}
 			n++

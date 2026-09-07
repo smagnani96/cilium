@@ -185,6 +185,7 @@ GetAgentEventsResponse contains an event received from the Cilium agent.
 | ----- | ---- | ----- | ----------- |
 | number | [uint64](#uint64) |  | Maximum number of entries that should be returned. 0 means no limit. |
 | node_name | [string](#string) |  | node_name, if set, restricts the dump to the node with this name. |
+| enrich | [bool](#bool) |  | enrich requests identity, namespace, pod name, service, and node-name enrichment for the returned entries. Has no effect if the agent&#39;s own hubble-enable-conntrack-enrichment flag is disabled. Defaults to false. |
 
 
 
