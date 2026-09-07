@@ -7,4 +7,5 @@ import "errors"
 
 var (
 	ErrExporterDisabled = errors.New("map exporter is disabled")
+	ErrExportInProgress = errors.New("map export is already in progress")
 )

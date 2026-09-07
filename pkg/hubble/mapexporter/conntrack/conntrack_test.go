@@ -73,6 +73,10 @@ func TestConntrackExporter_API(t *testing.T) {
 	err := c.GetConntrackEntries(t.Context(), &observerpb.GetConntrackEntriesRequest{}, nil)
 	require.Nil(t, err)
 
+	c.inFlight.Store(true)
+	err = c.GetConntrackEntries(t.Context(), &observerpb.GetConntrackEntriesRequest{}, nil)
+	require.ErrorIs(t, err, common.ErrExportInProgress)
+
 	c = newConntrackExporter(Config{EnableConntrack: false}, &mockCTMaps{}, hivetest.Logger(t))
 	err = c.GetConntrackEntries(t.Context(), &observerpb.GetConntrackEntriesRequest{}, nil)
 	require.ErrorIs(t, err, common.ErrExporterDisabled)

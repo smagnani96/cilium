@@ -282,6 +282,8 @@ func (s *LocalObserverServer) GetConntrackEntries(
 		return err == nil
 	})
 	switch {
+	case errors.Is(err, common.ErrExportInProgress):
+		return status.Errorf(codes.Unavailable, "conntrack export already in progress")
 	case errors.Is(err, common.ErrExporterDisabled):
 		return status.Errorf(codes.Unavailable, "conntrack export is disabled")
 	case err != nil:
