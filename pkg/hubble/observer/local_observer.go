@@ -286,6 +286,8 @@ func (s *LocalObserverServer) GetConntrackEntries(
 		return status.Errorf(codes.Unavailable, "conntrack export already in progress")
 	case errors.Is(err, common.ErrExporterDisabled):
 		return status.Errorf(codes.Unavailable, "conntrack export is disabled")
+	case errors.Is(err, common.ErrExportRateLimitExceeded):
+		return status.Errorf(codes.ResourceExhausted, "conntrack export rate limit exceeded, try again later")
 	case err != nil:
 		return err
 	default:

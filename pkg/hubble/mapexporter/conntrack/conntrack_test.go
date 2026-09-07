@@ -69,15 +69,19 @@ func (m *mockCTMaps) ActiveMaps() []*ctmap.Map {
 }
 
 func TestConntrackExporter_API(t *testing.T) {
-	c := newConntrackExporter(Config{EnableConntrack: true}, &mockCTMaps{}, hivetest.Logger(t))
+	c := newConntrackExporter(Config{EnableConntrack: true, ConntrackRateLimit: 30 * time.Second}, &mockCTMaps{}, hivetest.Logger(t))
 	err := c.GetConntrackEntries(t.Context(), &observerpb.GetConntrackEntriesRequest{}, nil)
 	require.Nil(t, err)
 
+	err = c.GetConntrackEntries(t.Context(), &observerpb.GetConntrackEntriesRequest{}, nil)
+	require.ErrorIs(t, err, common.ErrExportRateLimitExceeded)
+
+	c = newConntrackExporter(Config{EnableConntrack: true, ConntrackRateLimit: 30 * time.Second}, &mockCTMaps{}, hivetest.Logger(t))
 	c.inFlight.Store(true)
 	err = c.GetConntrackEntries(t.Context(), &observerpb.GetConntrackEntriesRequest{}, nil)
 	require.ErrorIs(t, err, common.ErrExportInProgress)
 
-	c = newConntrackExporter(Config{EnableConntrack: false}, &mockCTMaps{}, hivetest.Logger(t))
+	c = newConntrackExporter(Config{EnableConntrack: false, ConntrackRateLimit: 30 * time.Second}, &mockCTMaps{}, hivetest.Logger(t))
 	err = c.GetConntrackEntries(t.Context(), &observerpb.GetConntrackEntriesRequest{}, nil)
 	require.ErrorIs(t, err, common.ErrExporterDisabled)
 }

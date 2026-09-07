@@ -4,6 +4,8 @@
 package conntrack
 
 import (
+	"time"
+
 	"github.com/cilium/hive/cell"
 	"github.com/spf13/pflag"
 )
@@ -17,14 +19,18 @@ var Cell = cell.Module(
 )
 
 var defaultConntrackExporterConfig = Config{
-	EnableConntrack: true,
+	EnableConntrack:    true,
+	ConntrackRateLimit: 30 * time.Second,
 }
 
 type Config struct {
 	// Enable exporting of the node's datapath conntrack maps on demand.
 	EnableConntrack bool `mapstructure:"hubble-enable-conntrack"`
+	// ConntrackRateLimit specifies the minimum interval between GetConntrackEntries API calls.
+	ConntrackRateLimit time.Duration `mapstructure:"hubble-conntrack-rate-limit"`
 }
 
 func (def Config) Flags(flags *pflag.FlagSet) {
 	flags.Bool("hubble-enable-conntrack", def.EnableConntrack, "Enable the GetConntrackEntries API, which dumps the node's datapath conntrack maps on demand.")
+	flags.Duration("hubble-conntrack-rate-limit", def.ConntrackRateLimit, "Minimum interval between GetConntrackEntries API calls. 0 means no rate limit.")
 }
