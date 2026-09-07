@@ -348,8 +348,15 @@ message ConntrackEntry {
 
     // source/destination are resolved from Cilium's identity/endpoint
     // state at read time. Unset if the resolution failed.
-    flow.Endpoint source = 20;
-    flow.Endpoint destination = 21;
+    flow.Endpoint source = 16;
+    flow.Endpoint destination = 17;
+
+    // service and backend are resolved from rev_nat_index/backend_id,
+    // and are therefore authoritative regardless of which side of a NAT'd
+    // connection the raw tuple currently represents.
+    // Unset if the corresponding ID is 0 or could not be resolved.
+    flow.Service service = 18;
+    flow.Endpoint backend = 19;
 }
 
 // ConntrackEntryTCP holds TCP-specific per-connection state, only set on

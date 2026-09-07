@@ -269,7 +269,37 @@ var (
 	}
 
 	FrontendByServiceName = frontendServiceIndex.Query
+
+	// frontendIDIndex indexes by ServiceID (the same numeric ID stored in
+	// the BPF services/reverse-NAT maps, e.g. a conntrack entry's
+	// RevNAT/rev_nat_index field). ID 0 means "not a reconciliation
+	// candidate" and is shared by every such Frontend, so it is deliberately
+	// excluded here despite the index being marked Unique. A non-zero ID is
+	// allocated 1:1 by the reconciler's idAllocator and is genuinely unique.
+	frontendIDIndex = statedb.Index[*Frontend, ServiceID]{
+		Name: "id",
+		FromObject: func(fe *Frontend) index.KeySet {
+			return index.NewKeySet(index.Uint16(uint16(fe.ID)))
+		},
+		FromKey: func(id ServiceID) index.Key {
+			return index.Uint16(uint16(id))
+		},
+		FromString: index.Uint16String,
+		Unique:     true,
+	}
+
+	frontendByID = frontendIDIndex.Query
 )
+
+// LookupFrontendByID looks up a frontend by its ServiceID, the same numeric
+// ID stored in the BPF services/reverse-NAT maps.
+func LookupFrontendByID(txn statedb.ReadTxn, fes statedb.Table[*Frontend], id ServiceID) (fe *Frontend, found bool) {
+	if id == 0 {
+		return nil, false
+	}
+	fe, _, found = fes.Get(txn, frontendByID(id))
+	return
+}
 
 // LookupFrontendByTuple looks up a frontend with an address without constructing a L3n4Addr.
 // This is used in hubble code when doing lots of lookups with low hit rates and we want to avoid
@@ -301,5 +331,6 @@ func NewFrontendsTable(cfg Config, db *statedb.DB) (statedb.RWTable[*Frontend], 
 		FrontendTableName,
 		frontendAddressIndex,
 		frontendServiceIndex,
+		frontendIDIndex,
 	)
 }

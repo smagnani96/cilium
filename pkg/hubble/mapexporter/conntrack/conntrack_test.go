@@ -30,6 +30,7 @@ var (
 	clock        = common.BPFClock{Now: time.Unix(1700000000, 0), NowCTSec: 1000, Converter: func(t uint64) uint64 { return t }}
 	sPodName     = "source-pod"
 	dPodName     = "destination-pod"
+	svcName      = "backend"
 	key4         = &ctmap.CtKey4Global{
 		TupleKey4Global: tuple.TupleKey4Global{
 			TupleKey4: tuple.TupleKey4{
@@ -63,6 +64,9 @@ var (
 		RxFlagsSeen:  0x2,
 		LastTxReport: uint32(clock.NowCTSec + txReportDiff),
 		LastRxReport: uint32(clock.NowCTSec),
+		RevNAT:       1,
+		NatPort:      8989,
+		Union0:       [2]uint64{0, 99},
 	}
 )
 
@@ -74,19 +78,19 @@ func (m *mockCTMaps) ActiveMaps() []*ctmap.Map {
 }
 
 func TestConntrackExporter_API(t *testing.T) {
-	c := newConntrackExporter(Config{EnableConntrack: true, ConntrackRateLimit: 30 * time.Second}, &mockCTMaps{}, hivetest.Logger(t), nil)
+	c := newConntrackExporter(Config{EnableConntrack: true, ConntrackRateLimit: 30 * time.Second}, &mockCTMaps{}, hivetest.Logger(t), nil, nil)
 	err := c.GetConntrackEntries(t.Context(), &observerpb.GetConntrackEntriesRequest{}, nil)
 	require.Nil(t, err)
 
 	err = c.GetConntrackEntries(t.Context(), &observerpb.GetConntrackEntriesRequest{}, nil)
 	require.ErrorIs(t, err, common.ErrExportRateLimitExceeded)
 
-	c = newConntrackExporter(Config{EnableConntrack: true, ConntrackRateLimit: 30 * time.Second}, &mockCTMaps{}, hivetest.Logger(t), nil)
+	c = newConntrackExporter(Config{EnableConntrack: true, ConntrackRateLimit: 30 * time.Second}, &mockCTMaps{}, hivetest.Logger(t), nil, nil)
 	c.inFlight.Store(true)
 	err = c.GetConntrackEntries(t.Context(), &observerpb.GetConntrackEntriesRequest{}, nil)
 	require.ErrorIs(t, err, common.ErrExportInProgress)
 
-	c = newConntrackExporter(Config{EnableConntrack: false, ConntrackRateLimit: 30 * time.Second}, &mockCTMaps{}, hivetest.Logger(t), nil)
+	c = newConntrackExporter(Config{EnableConntrack: false, ConntrackRateLimit: 30 * time.Second}, &mockCTMaps{}, hivetest.Logger(t), nil, nil)
 	err = c.GetConntrackEntries(t.Context(), &observerpb.GetConntrackEntriesRequest{}, nil)
 	require.ErrorIs(t, err, common.ErrExporterDisabled)
 }
@@ -102,6 +106,7 @@ func TestConntrackExporter_Conversion(t *testing.T) {
 		var (
 			isTCP        bool
 			isDirIn      bool
+			isService    bool
 			saddr, daddr string
 			sport, dport uint16
 			proto        u8proto.U8proto
@@ -116,6 +121,7 @@ func TestConntrackExporter_Conversion(t *testing.T) {
 			proto = key.NextHeader
 			isDirIn = key.Flags&ctmap.TUPLE_F_IN != 0
 			isTCP = key.NextHeader == u8proto.TCP
+			isService = key.Flags&ctmap.TUPLE_F_SERVICE != 0
 		} else {
 			key := s.key.(*ctmap.CtKey4Global)
 			saddr = key.DestAddr.String()
@@ -125,6 +131,7 @@ func TestConntrackExporter_Conversion(t *testing.T) {
 			proto = key.NextHeader
 			isDirIn = key.Flags&ctmap.TUPLE_F_IN != 0
 			isTCP = key.NextHeader == u8proto.TCP
+			isService = key.Flags&ctmap.TUPLE_F_SERVICE != 0
 		}
 
 		epGetter := &testutils.FakeEndpointGetter{
@@ -142,8 +149,28 @@ func TestConntrackExporter_Conversion(t *testing.T) {
 				return nil
 			},
 		}
+		svcGetter := &testutils.FakeServiceGetter{
+			OnGetServiceByAddr: func(ip netip.Addr, port uint16) *flowpb.Service {
+				if ip.String() == daddr {
+					return &flowpb.Service{Name: svcName}
+				}
+				if port == byteorder.NetworkToHost16(entry.NatPort) {
+					return &flowpb.Service{Name: svcName}
+				}
+				return nil
+			},
+			OnGetServiceByRevNatIndex: func(revNatIndex uint32) *flowpb.Service {
+				if revNatIndex == uint32(entry.RevNAT) {
+					return &flowpb.Service{Name: svcName}
+				}
+				return nil
+			},
+			OnGetBackendAddrByID: func(backendID uint32, isIPv6 bool) (netip.Addr, bool) {
+				return netip.MustParseAddr(daddr), true
+			},
+		}
 
-		got := ctEntryToProto(s.key, entry, clock, true, epGetter)
+		got := ctEntryToProto(s.key, entry, clock, true, epGetter, svcGetter)
 		require.NotNil(t, got)
 
 		assert.Equal(t, saddr, got.SourceIp)
@@ -185,7 +212,17 @@ func TestConntrackExporter_Conversion(t *testing.T) {
 		require.NotNil(t, got.Destination)
 		assert.Equal(t, dPodName, got.Destination.PodName)
 
-		got = ctEntryToProto(s.key, entry, clock, false, epGetter)
+		require.NotNil(t, got.Service)
+		require.Equal(t, svcName, got.Service.Name)
+
+		if isService {
+			require.NotNil(t, got.Backend)
+			assert.Equal(t, dPodName, got.Backend.PodName)
+		} else {
+			require.Nil(t, got.Backend)
+		}
+
+		got = ctEntryToProto(s.key, entry, clock, false, epGetter, svcGetter)
 		require.Nil(t, got.Source)
 		require.Nil(t, got.Destination)
 	}

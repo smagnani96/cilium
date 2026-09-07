@@ -5,14 +5,17 @@ package conntrack
 
 import (
 	"context"
+	"encoding/binary"
 	"log/slog"
 	"net/netip"
 	"sync/atomic"
 
+	"github.com/cilium/cilium/pkg/byteorder"
 	"github.com/cilium/cilium/pkg/hubble/mapexporter/common"
 	resolverTypes "github.com/cilium/cilium/pkg/hubble/resolver/types"
 	"github.com/cilium/cilium/pkg/maps/ctmap"
 	"github.com/cilium/cilium/pkg/rate"
+	"github.com/cilium/cilium/pkg/types"
 	"github.com/cilium/cilium/pkg/u8proto"
 
 	flowpb "github.com/cilium/cilium/api/v1/flow"
@@ -20,10 +23,11 @@ import (
 )
 
 type ConntrackExporter struct {
-	cfg      Config
-	ctMaps   ctmap.CTMaps
-	logger   *slog.Logger
-	epGetter resolverTypes.EndpointGetter
+	cfg       Config
+	ctMaps    ctmap.CTMaps
+	logger    *slog.Logger
+	epGetter  resolverTypes.EndpointGetter
+	svcGetter resolverTypes.ServiceGetter
 
 	clock         common.BPFClock
 	inFlight      atomic.Bool
@@ -35,6 +39,7 @@ func newConntrackExporter(
 	ctMaps ctmap.CTMaps,
 	log *slog.Logger,
 	epGetter resolverTypes.EndpointGetter,
+	svcGetter resolverTypes.ServiceGetter,
 ) *ConntrackExporter {
 	clock, err := common.NewBPFClock()
 	if err != nil {
@@ -50,6 +55,7 @@ func newConntrackExporter(
 		ctMaps:        ctMaps,
 		logger:        log,
 		epGetter:      epGetter,
+		svcGetter:     svcGetter,
 		clock:         clock,
 		ctRateLimiter: rateLimiter,
 	}
@@ -74,7 +80,7 @@ func (c *ConntrackExporter) GetConntrackEntries(ctx context.Context, req *observ
 
 	for _, m := range c.ctMaps.ActiveMaps() {
 		err := m.DumpEntries(ctx, func(key ctmap.CtKey, val *ctmap.CtEntry) bool {
-			if !yield(ctEntryToProto(key, val, c.clock, c.cfg.EnableConntrackEnrichment, c.epGetter)) {
+			if !yield(ctEntryToProto(key, val, c.clock, c.cfg.EnableConntrackEnrichment, c.epGetter, c.svcGetter)) {
 				return false
 			}
 			n++
@@ -95,6 +101,7 @@ func ctEntryToProto(
 	clock common.BPFClock,
 	enrich bool,
 	epGetter resolverTypes.EndpointGetter,
+	svcGetter resolverTypes.ServiceGetter,
 ) *observerpb.ConntrackEntry {
 	e := &observerpb.ConntrackEntry{
 		Packets:        entry.Packets,
@@ -108,6 +115,7 @@ func ctEntryToProto(
 	var srcAddr, dstAddr netip.Addr
 	var srcPort, dstPort uint16
 	var tupleFlags uint8
+	var isIPv6 bool
 
 	// The datapath's tuple stores addresses swapped relative to the real
 	// packet (see the field doc comments on struct ipv{4,6}_ct_tuple in
@@ -123,6 +131,7 @@ func ctEntryToProto(
 		srcPort, dstPort = k.SourcePort, k.DestPort
 		e.Protocol = uint32(k.NextHeader)
 		tupleFlags = k.Flags
+		isIPv6 = true
 	default:
 		return e
 	}
@@ -157,6 +166,21 @@ func ctEntryToProto(
 		e.Destination = epGetter.ResolveEndpoint(dstAddr, entry.SourceSecurityID, dpContext)
 	}
 
+	if svcGetter != nil {
+		if entry.RevNAT != 0 {
+			e.Service = svcGetter.GetServiceByRevNatIndex(uint32(byteorder.NetworkToHost16(entry.RevNAT)))
+			if e.ServiceEntry && epGetter != nil {
+				if backendAddr, ok := svcGetter.GetBackendAddrByID(uint32(entry.Union0[1]), isIPv6); ok {
+					e.Backend = epGetter.ResolveEndpoint(backendAddr, 0, resolverTypes.DatapathContext{})
+				}
+			}
+		}
+
+		if entry.NatPort != 0 {
+			e.Service = svcGetter.GetServiceByAddr(natAddrFromUnion0(entry.Union0, isIPv6), byteorder.NetworkToHost16(entry.NatPort))
+		}
+	}
+
 	return e
 }
 
@@ -174,4 +198,17 @@ func ctEntryFlagsToProto(flags uint16) *observerpb.ConntrackEntryFlags {
 		FromL7Lb:      flags&ctmap.FromL7LB != 0,
 		FromTunnel:    flags&ctmap.FromTunnel != 0,
 	}
+}
+
+func natAddrFromUnion0(union0 [2]uint64, isIPv6 bool) netip.Addr {
+	var raw [16]byte
+	binary.LittleEndian.PutUint64(raw[0:8], union0[0])
+	binary.LittleEndian.PutUint64(raw[8:16], union0[1])
+
+	if isIPv6 {
+		return types.IPv6(raw).Addr()
+	}
+	var v4 types.IPv4
+	copy(v4[:], raw[12:16])
+	return v4.Addr()
 }

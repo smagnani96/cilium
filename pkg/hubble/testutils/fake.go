@@ -439,7 +439,9 @@ var NoopIPGetter = FakeIPGetter{
 
 // FakeServiceGetter is used for unit tests that need ServiceGetter.
 type FakeServiceGetter struct {
-	OnGetServiceByAddr func(ip netip.Addr, port uint16) *flowpb.Service
+	OnGetServiceByAddr        func(ip netip.Addr, port uint16) *flowpb.Service
+	OnGetServiceByRevNatIndex func(revNatIndex uint32) *flowpb.Service
+	OnGetBackendAddrByID      func(backendID uint32, isIPv6 bool) (netip.Addr, bool)
 }
 
 // GetServiceByAddr implements FakeServiceGetter.GetServiceByAddr.
@@ -448,6 +450,22 @@ func (f *FakeServiceGetter) GetServiceByAddr(ip netip.Addr, port uint16) *flowpb
 		return f.OnGetServiceByAddr(ip, port)
 	}
 	panic("OnGetServiceByAddr not set")
+}
+
+// GetServiceByRevNatIndex implements FakeServiceGetter.GetServiceByRevNatIndex.
+func (f *FakeServiceGetter) GetServiceByRevNatIndex(revNatIndex uint32) *flowpb.Service {
+	if f.OnGetServiceByRevNatIndex != nil {
+		return f.OnGetServiceByRevNatIndex(revNatIndex)
+	}
+	panic("OnGetServiceByRevNatIndex not set")
+}
+
+// GetBackendAddrByID implements FakeServiceGetter.GetBackendAddrByID.
+func (f *FakeServiceGetter) GetBackendAddrByID(backendID uint32, isIPv6 bool) (netip.Addr, bool) {
+	if f.OnGetBackendAddrByID != nil {
+		return f.OnGetBackendAddrByID(backendID, isIPv6)
+	}
+	panic("OnGetBackendAddrByID not set")
 }
 
 // NoopServiceGetter always returns an empty response.
