@@ -345,6 +345,11 @@ message ConntrackEntry {
     // service_entry reports whether this entry's tuple was recorded for a
     // load-balanced service connection.
     bool service_entry = 15;
+
+    // source/destination are resolved from Cilium's identity/endpoint
+    // state at read time. Unset if the resolution failed.
+    flow.Endpoint source = 20;
+    flow.Endpoint destination = 21;
 }
 
 // ConntrackEntryTCP holds TCP-specific per-connection state, only set on

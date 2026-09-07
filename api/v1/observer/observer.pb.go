@@ -1746,7 +1746,11 @@ type ConntrackEntry struct {
 	Related bool `protobuf:"varint,14,opt,name=related,proto3" json:"related,omitempty"`
 	// service_entry reports whether this entry's tuple was recorded for a
 	// load-balanced service connection.
-	ServiceEntry  bool `protobuf:"varint,15,opt,name=service_entry,json=serviceEntry,proto3" json:"service_entry,omitempty"`
+	ServiceEntry bool `protobuf:"varint,15,opt,name=service_entry,json=serviceEntry,proto3" json:"service_entry,omitempty"`
+	// source/destination are resolved from Cilium's identity/endpoint
+	// state at read time. Unset if the resolution failed.
+	Source        *flow.Endpoint `protobuf:"bytes,20,opt,name=source,proto3" json:"source,omitempty"`
+	Destination   *flow.Endpoint `protobuf:"bytes,21,opt,name=destination,proto3" json:"destination,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1884,6 +1888,20 @@ func (x *ConntrackEntry) GetServiceEntry() bool {
 		return x.ServiceEntry
 	}
 	return false
+}
+
+func (x *ConntrackEntry) GetSource() *flow.Endpoint {
+	if x != nil {
+		return x.Source
+	}
+	return nil
+}
+
+func (x *ConntrackEntry) GetDestination() *flow.Endpoint {
+	if x != nil {
+		return x.Destination
+	}
+	return nil
 }
 
 // ConntrackEntryTCP holds TCP-specific per-connection state, only set on
@@ -2349,7 +2367,7 @@ const file_observer_observer_proto_rawDesc = "" +
 	"nodeStatus\x12\x1c\n" +
 	"\tnode_name\x18\xe8\a \x01(\tR\bnodeName\x12/\n" +
 	"\x04time\x18\xe9\a \x01(\v2\x1a.google.protobuf.TimestampR\x04timeB\x10\n" +
-	"\x0eresponse_types\"\x8e\x05\n" +
+	"\x0eresponse_types\"\xe8\x05\n" +
 	"\x0eConntrackEntry\x12\x1b\n" +
 	"\tsource_ip\x18\x01 \x01(\tR\bsourceIp\x12%\n" +
 	"\x0edestination_ip\x18\x02 \x01(\tR\rdestinationIp\x12\x1f\n" +
@@ -2368,7 +2386,9 @@ const file_observer_observer_proto_rawDesc = "" +
 	"\x11last_tx_report_at\x18\f \x01(\v2\x1a.google.protobuf.TimestampR\x0elastTxReportAt\x12E\n" +
 	"\x11last_rx_report_at\x18\r \x01(\v2\x1a.google.protobuf.TimestampR\x0elastRxReportAt\x12\x18\n" +
 	"\arelated\x18\x0e \x01(\bR\arelated\x12#\n" +
-	"\rservice_entry\x18\x0f \x01(\bR\fserviceEntry\"[\n" +
+	"\rservice_entry\x18\x0f \x01(\bR\fserviceEntry\x12&\n" +
+	"\x06source\x18\x14 \x01(\v2\x0e.flow.EndpointR\x06source\x120\n" +
+	"\vdestination\x18\x15 \x01(\v2\x0e.flow.EndpointR\vdestination\"[\n" +
 	"\x11ConntrackEntryTCP\x12\"\n" +
 	"\rtx_flags_seen\x18\x01 \x01(\rR\vtxFlagsSeen\x12\"\n" +
 	"\rrx_flags_seen\x18\x02 \x01(\rR\vrxFlagsSeen\"\xbb\x02\n" +
@@ -2458,6 +2478,7 @@ var file_observer_observer_proto_goTypes = []any{
 	(*flow.DebugEvent)(nil),              // 31: flow.DebugEvent
 	(relay.NodeState)(0),                 // 32: relay.NodeState
 	(flow.TrafficDirection)(0),           // 33: flow.TrafficDirection
+	(*flow.Endpoint)(nil),                // 34: flow.Endpoint
 }
 var file_observer_observer_proto_depIdxs = []int32{
 	22, // 0: observer.ServerStatusResponse.num_connected_nodes:type_name -> google.protobuf.UInt32Value
@@ -2494,31 +2515,33 @@ var file_observer_observer_proto_depIdxs = []int32{
 	18, // 31: observer.ConntrackEntry.tcp:type_name -> observer.ConntrackEntryTCP
 	24, // 32: observer.ConntrackEntry.last_tx_report_at:type_name -> google.protobuf.Timestamp
 	24, // 33: observer.ConntrackEntry.last_rx_report_at:type_name -> google.protobuf.Timestamp
-	27, // 34: observer.ExportEvent.flow:type_name -> flow.Flow
-	28, // 35: observer.ExportEvent.node_status:type_name -> relay.NodeStatusEvent
-	29, // 36: observer.ExportEvent.lost_events:type_name -> flow.LostEvent
-	30, // 37: observer.ExportEvent.agent_event:type_name -> flow.AgentEvent
-	31, // 38: observer.ExportEvent.debug_event:type_name -> flow.DebugEvent
-	24, // 39: observer.ExportEvent.time:type_name -> google.protobuf.Timestamp
-	2,  // 40: observer.Observer.GetFlows:input_type -> observer.GetFlowsRequest
-	4,  // 41: observer.Observer.GetAgentEvents:input_type -> observer.GetAgentEventsRequest
-	6,  // 42: observer.Observer.GetDebugEvents:input_type -> observer.GetDebugEventsRequest
-	8,  // 43: observer.Observer.GetNodes:input_type -> observer.GetNodesRequest
-	12, // 44: observer.Observer.GetNamespaces:input_type -> observer.GetNamespacesRequest
-	0,  // 45: observer.Observer.ServerStatus:input_type -> observer.ServerStatusRequest
-	15, // 46: observer.Observer.GetConntrackEntries:input_type -> observer.GetConntrackEntriesRequest
-	3,  // 47: observer.Observer.GetFlows:output_type -> observer.GetFlowsResponse
-	5,  // 48: observer.Observer.GetAgentEvents:output_type -> observer.GetAgentEventsResponse
-	7,  // 49: observer.Observer.GetDebugEvents:output_type -> observer.GetDebugEventsResponse
-	9,  // 50: observer.Observer.GetNodes:output_type -> observer.GetNodesResponse
-	13, // 51: observer.Observer.GetNamespaces:output_type -> observer.GetNamespacesResponse
-	1,  // 52: observer.Observer.ServerStatus:output_type -> observer.ServerStatusResponse
-	16, // 53: observer.Observer.GetConntrackEntries:output_type -> observer.GetConntrackEntriesResponse
-	47, // [47:54] is the sub-list for method output_type
-	40, // [40:47] is the sub-list for method input_type
-	40, // [40:40] is the sub-list for extension type_name
-	40, // [40:40] is the sub-list for extension extendee
-	0,  // [0:40] is the sub-list for field type_name
+	34, // 34: observer.ConntrackEntry.source:type_name -> flow.Endpoint
+	34, // 35: observer.ConntrackEntry.destination:type_name -> flow.Endpoint
+	27, // 36: observer.ExportEvent.flow:type_name -> flow.Flow
+	28, // 37: observer.ExportEvent.node_status:type_name -> relay.NodeStatusEvent
+	29, // 38: observer.ExportEvent.lost_events:type_name -> flow.LostEvent
+	30, // 39: observer.ExportEvent.agent_event:type_name -> flow.AgentEvent
+	31, // 40: observer.ExportEvent.debug_event:type_name -> flow.DebugEvent
+	24, // 41: observer.ExportEvent.time:type_name -> google.protobuf.Timestamp
+	2,  // 42: observer.Observer.GetFlows:input_type -> observer.GetFlowsRequest
+	4,  // 43: observer.Observer.GetAgentEvents:input_type -> observer.GetAgentEventsRequest
+	6,  // 44: observer.Observer.GetDebugEvents:input_type -> observer.GetDebugEventsRequest
+	8,  // 45: observer.Observer.GetNodes:input_type -> observer.GetNodesRequest
+	12, // 46: observer.Observer.GetNamespaces:input_type -> observer.GetNamespacesRequest
+	0,  // 47: observer.Observer.ServerStatus:input_type -> observer.ServerStatusRequest
+	15, // 48: observer.Observer.GetConntrackEntries:input_type -> observer.GetConntrackEntriesRequest
+	3,  // 49: observer.Observer.GetFlows:output_type -> observer.GetFlowsResponse
+	5,  // 50: observer.Observer.GetAgentEvents:output_type -> observer.GetAgentEventsResponse
+	7,  // 51: observer.Observer.GetDebugEvents:output_type -> observer.GetDebugEventsResponse
+	9,  // 52: observer.Observer.GetNodes:output_type -> observer.GetNodesResponse
+	13, // 53: observer.Observer.GetNamespaces:output_type -> observer.GetNamespacesResponse
+	1,  // 54: observer.Observer.ServerStatus:output_type -> observer.ServerStatusResponse
+	16, // 55: observer.Observer.GetConntrackEntries:output_type -> observer.GetConntrackEntriesResponse
+	49, // [49:56] is the sub-list for method output_type
+	42, // [42:49] is the sub-list for method input_type
+	42, // [42:42] is the sub-list for extension type_name
+	42, // [42:42] is the sub-list for extension extendee
+	0,  // [0:42] is the sub-list for field type_name
 }
 
 func init() { file_observer_observer_proto_init() }
