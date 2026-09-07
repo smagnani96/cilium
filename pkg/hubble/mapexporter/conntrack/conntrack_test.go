@@ -31,6 +31,7 @@ var (
 	sPodName     = "source-pod"
 	dPodName     = "destination-pod"
 	svcName      = "backend"
+	nodeName     = "node"
 	key4         = &ctmap.CtKey4Global{
 		TupleKey4Global: tuple.TupleKey4Global{
 			TupleKey4: tuple.TupleKey4{
@@ -78,19 +79,19 @@ func (m *mockCTMaps) ActiveMaps() []*ctmap.Map {
 }
 
 func TestConntrackExporter_API(t *testing.T) {
-	c := newConntrackExporter(Config{EnableConntrack: true, ConntrackRateLimit: 30 * time.Second}, &mockCTMaps{}, hivetest.Logger(t), nil, nil)
+	c := newConntrackExporter(Config{EnableConntrack: true, ConntrackRateLimit: 30 * time.Second}, &mockCTMaps{}, hivetest.Logger(t), nil, nil, nil)
 	err := c.GetConntrackEntries(t.Context(), &observerpb.GetConntrackEntriesRequest{}, nil)
 	require.Nil(t, err)
 
 	err = c.GetConntrackEntries(t.Context(), &observerpb.GetConntrackEntriesRequest{}, nil)
 	require.ErrorIs(t, err, common.ErrExportRateLimitExceeded)
 
-	c = newConntrackExporter(Config{EnableConntrack: true, ConntrackRateLimit: 30 * time.Second}, &mockCTMaps{}, hivetest.Logger(t), nil, nil)
+	c = newConntrackExporter(Config{EnableConntrack: true, ConntrackRateLimit: 30 * time.Second}, &mockCTMaps{}, hivetest.Logger(t), nil, nil, nil)
 	c.inFlight.Store(true)
 	err = c.GetConntrackEntries(t.Context(), &observerpb.GetConntrackEntriesRequest{}, nil)
 	require.ErrorIs(t, err, common.ErrExportInProgress)
 
-	c = newConntrackExporter(Config{EnableConntrack: false, ConntrackRateLimit: 30 * time.Second}, &mockCTMaps{}, hivetest.Logger(t), nil, nil)
+	c = newConntrackExporter(Config{EnableConntrack: false, ConntrackRateLimit: 30 * time.Second}, &mockCTMaps{}, hivetest.Logger(t), nil, nil, nil)
 	err = c.GetConntrackEntries(t.Context(), &observerpb.GetConntrackEntriesRequest{}, nil)
 	require.ErrorIs(t, err, common.ErrExporterDisabled)
 }
@@ -169,8 +170,16 @@ func TestConntrackExporter_Conversion(t *testing.T) {
 				return netip.MustParseAddr(daddr), true
 			},
 		}
+		nodeGetter := &testutils.FakeNodeGetter{
+			OnGetNodeNameByIP: func(ip netip.Addr) string {
+				if ip.String() == saddr {
+					return nodeName
+				}
+				return ""
+			},
+		}
 
-		got := ctEntryToProto(s.key, entry, clock, true, epGetter, svcGetter)
+		got := ctEntryToProto(s.key, entry, clock, true, epGetter, svcGetter, nodeGetter)
 		require.NotNil(t, got)
 
 		assert.Equal(t, saddr, got.SourceIp)
@@ -222,7 +231,10 @@ func TestConntrackExporter_Conversion(t *testing.T) {
 			require.Nil(t, got.Backend)
 		}
 
-		got = ctEntryToProto(s.key, entry, clock, false, epGetter, svcGetter)
+		assert.Empty(t, got.DestinationNodeName)
+		assert.Equal(t, nodeName, got.SourceNodeName)
+
+		got = ctEntryToProto(s.key, entry, clock, false, epGetter, svcGetter, nodeGetter)
 		require.Nil(t, got.Source)
 		require.Nil(t, got.Destination)
 	}

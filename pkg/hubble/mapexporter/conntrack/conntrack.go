@@ -13,6 +13,7 @@ import (
 	"github.com/cilium/cilium/pkg/byteorder"
 	"github.com/cilium/cilium/pkg/hubble/mapexporter/common"
 	resolverTypes "github.com/cilium/cilium/pkg/hubble/resolver/types"
+	"github.com/cilium/cilium/pkg/identity"
 	"github.com/cilium/cilium/pkg/maps/ctmap"
 	"github.com/cilium/cilium/pkg/rate"
 	"github.com/cilium/cilium/pkg/types"
@@ -23,11 +24,12 @@ import (
 )
 
 type ConntrackExporter struct {
-	cfg       Config
-	ctMaps    ctmap.CTMaps
-	logger    *slog.Logger
-	epGetter  resolverTypes.EndpointGetter
-	svcGetter resolverTypes.ServiceGetter
+	cfg        Config
+	ctMaps     ctmap.CTMaps
+	logger     *slog.Logger
+	epGetter   resolverTypes.EndpointGetter
+	svcGetter  resolverTypes.ServiceGetter
+	nodeGetter resolverTypes.NodeGetter
 
 	clock         common.BPFClock
 	inFlight      atomic.Bool
@@ -40,6 +42,7 @@ func newConntrackExporter(
 	log *slog.Logger,
 	epGetter resolverTypes.EndpointGetter,
 	svcGetter resolverTypes.ServiceGetter,
+	nodeGetter resolverTypes.NodeGetter,
 ) *ConntrackExporter {
 	clock, err := common.NewBPFClock()
 	if err != nil {
@@ -56,6 +59,7 @@ func newConntrackExporter(
 		logger:        log,
 		epGetter:      epGetter,
 		svcGetter:     svcGetter,
+		nodeGetter:    nodeGetter,
 		clock:         clock,
 		ctRateLimiter: rateLimiter,
 	}
@@ -80,7 +84,7 @@ func (c *ConntrackExporter) GetConntrackEntries(ctx context.Context, req *observ
 
 	for _, m := range c.ctMaps.ActiveMaps() {
 		err := m.DumpEntries(ctx, func(key ctmap.CtKey, val *ctmap.CtEntry) bool {
-			if !yield(ctEntryToProto(key, val, c.clock, c.cfg.EnableConntrackEnrichment, c.epGetter, c.svcGetter)) {
+			if !yield(ctEntryToProto(key, val, c.clock, c.cfg.EnableConntrackEnrichment, c.epGetter, c.svcGetter, c.nodeGetter)) {
 				return false
 			}
 			n++
@@ -102,6 +106,7 @@ func ctEntryToProto(
 	enrich bool,
 	epGetter resolverTypes.EndpointGetter,
 	svcGetter resolverTypes.ServiceGetter,
+	nodeGetter resolverTypes.NodeGetter,
 ) *observerpb.ConntrackEntry {
 	e := &observerpb.ConntrackEntry{
 		Packets:        entry.Packets,
@@ -181,6 +186,15 @@ func ctEntryToProto(
 		}
 	}
 
+	if nodeGetter != nil {
+		if mayBeNodeAddress(e.Source) {
+			e.SourceNodeName = nodeGetter.GetNodeNameByIP(srcAddr)
+		}
+		if mayBeNodeAddress(e.Destination) {
+			e.DestinationNodeName = nodeGetter.GetNodeNameByIP(dstAddr)
+		}
+	}
+
 	return e
 }
 
@@ -211,4 +225,23 @@ func natAddrFromUnion0(union0 [2]uint64, isIPv6 bool) netip.Addr {
 	var v4 types.IPv4
 	copy(v4[:], raw[12:16])
 	return v4.Addr()
+}
+
+// mayBeNodeAddress reports whether ep's identity is consistent with its
+// address belonging to a cluster node. A nil ep  or an unresolved identity
+// can't rule anything out, so both count as "maybe".
+func mayBeNodeAddress(ep *flowpb.Endpoint) bool {
+	if ep == nil {
+		return true
+	}
+	switch identity.NumericIdentity(ep.Identity) {
+	case identity.IdentityUnknown,
+		identity.ReservedIdentityHost,
+		identity.ReservedIdentityRemoteNode,
+		identity.ReservedIdentityHealth,
+		identity.ReservedIdentityIngress:
+		return true
+	default:
+		return false
+	}
 }

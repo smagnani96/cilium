@@ -645,3 +645,21 @@ func (f *FakeMapExporter) GetConntrackEntries(ctx context.Context, req *observer
 }
 
 var NoopMapExporter = &FakeMapExporter{}
+
+// FakeNodeGetter implements observeroption.NodeResolver for tests.
+type FakeNodeGetter struct {
+	OnGetNodeNameByIP func(ip netip.Addr) string
+}
+
+func (f *FakeNodeGetter) GetNodeNameByIP(ip netip.Addr) string {
+	if f.OnGetNodeNameByIP != nil {
+		return f.OnGetNodeNameByIP(ip)
+	}
+	return ""
+}
+
+var NoopNodeGetter = &FakeNodeGetter{
+	OnGetNodeNameByIP: func(ip netip.Addr) string {
+		return ""
+	},
+}

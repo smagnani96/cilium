@@ -24,5 +24,6 @@ var Cell = cell.Module(
 		NewIPGetter,
 		NewPodMetadataGetter,
 		NewLinkGetter,
+		NewNodeGetter,
 	),
 )
