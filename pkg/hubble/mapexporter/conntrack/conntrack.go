@@ -6,6 +6,7 @@ package conntrack
 import (
 	"context"
 	"encoding/binary"
+	"fmt"
 	"log/slog"
 	"net/netip"
 	"sync/atomic"
@@ -21,6 +22,10 @@ import (
 
 	flowpb "github.com/cilium/cilium/api/v1/flow"
 	observerpb "github.com/cilium/cilium/api/v1/observer"
+)
+
+var (
+	ErrExporterEnrichmentDisabled = fmt.Errorf("conntrack enrichment is disabled")
 )
 
 type ConntrackExporter struct {
@@ -71,6 +76,9 @@ func newConntrackExporter(
 func (c *ConntrackExporter) GetConntrackEntries(ctx context.Context, req *observerpb.GetConntrackEntriesRequest, yield func(*observerpb.ConntrackEntry) bool) error {
 	if c == nil || !c.cfg.EnableConntrack {
 		return common.ErrExporterDisabled
+	}
+	if req.GetEnrich() && !c.cfg.EnableConntrackEnrichment {
+		return ErrExporterEnrichmentDisabled
 	}
 	if !c.inFlight.CompareAndSwap(false, true) {
 		return common.ErrExportInProgress

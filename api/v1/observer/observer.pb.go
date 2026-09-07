@@ -1554,7 +1554,11 @@ type GetConntrackEntriesRequest struct {
 	// Maximum number of entries that should be returned. 0 means no limit.
 	Number uint64 `protobuf:"varint,1,opt,name=number,proto3" json:"number,omitempty"`
 	// node_name, if set, restricts the dump to the node with this name.
-	NodeName      string `protobuf:"bytes,2,opt,name=node_name,json=nodeName,proto3" json:"node_name,omitempty"`
+	NodeName string `protobuf:"bytes,2,opt,name=node_name,json=nodeName,proto3" json:"node_name,omitempty"`
+	// enrich requests identity, namespace, pod name, service, and node-name
+	// enrichment for the returned entries. Has no effect if the agent's own
+	// hubble-enable-conntrack-enrichment flag is disabled. Defaults to false.
+	Enrich        bool `protobuf:"varint,3,opt,name=enrich,proto3" json:"enrich,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1601,6 +1605,13 @@ func (x *GetConntrackEntriesRequest) GetNodeName() string {
 		return x.NodeName
 	}
 	return ""
+}
+
+func (x *GetConntrackEntriesRequest) GetEnrich() bool {
+	if x != nil {
+		return x.Enrich
+	}
+	return false
 }
 
 // GetConntrackEntriesResponse contains either a single conntrack entry read
@@ -2396,10 +2407,11 @@ const file_observer_observer_proto_rawDesc = "" +
 	"namespaces\"C\n" +
 	"\tNamespace\x12\x18\n" +
 	"\acluster\x18\x01 \x01(\tR\acluster\x12\x1c\n" +
-	"\tnamespace\x18\x02 \x01(\tR\tnamespace\"Q\n" +
+	"\tnamespace\x18\x02 \x01(\tR\tnamespace\"i\n" +
 	"\x1aGetConntrackEntriesRequest\x12\x16\n" +
 	"\x06number\x18\x01 \x01(\x04R\x06number\x12\x1b\n" +
-	"\tnode_name\x18\x02 \x01(\tR\bnodeName\"\xeb\x01\n" +
+	"\tnode_name\x18\x02 \x01(\tR\bnodeName\x12\x16\n" +
+	"\x06enrich\x18\x03 \x01(\bR\x06enrich\"\xeb\x01\n" +
 	"\x1bGetConntrackEntriesResponse\x120\n" +
 	"\x05entry\x18\x01 \x01(\v2\x18.observer.ConntrackEntryH\x00R\x05entry\x129\n" +
 	"\vnode_status\x18\x02 \x01(\v2\x16.relay.NodeStatusEventH\x00R\n" +

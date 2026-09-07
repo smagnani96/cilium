@@ -91,6 +91,10 @@ func TestConntrackExporter_API(t *testing.T) {
 	err = c.GetConntrackEntries(t.Context(), &observerpb.GetConntrackEntriesRequest{}, nil)
 	require.ErrorIs(t, err, common.ErrExportInProgress)
 
+	c = newConntrackExporter(Config{EnableConntrack: true, ConntrackRateLimit: 30 * time.Second}, &mockCTMaps{}, hivetest.Logger(t), nil, nil, nil)
+	err = c.GetConntrackEntries(t.Context(), &observerpb.GetConntrackEntriesRequest{Enrich: true}, nil)
+	require.ErrorIs(t, err, ErrExporterEnrichmentDisabled)
+
 	c = newConntrackExporter(Config{EnableConntrack: false, ConntrackRateLimit: 30 * time.Second}, &mockCTMaps{}, hivetest.Logger(t), nil, nil, nil)
 	err = c.GetConntrackEntries(t.Context(), &observerpb.GetConntrackEntriesRequest{}, nil)
 	require.ErrorIs(t, err, common.ErrExporterDisabled)
