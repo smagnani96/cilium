@@ -11,6 +11,7 @@ import (
 
 	"github.com/cilium/cilium/pkg/hubble/mapexporter/common"
 	"github.com/cilium/cilium/pkg/maps/ctmap"
+	"github.com/cilium/cilium/pkg/rate"
 	"github.com/cilium/cilium/pkg/u8proto"
 
 	flowpb "github.com/cilium/cilium/api/v1/flow"
@@ -22,8 +23,9 @@ type ConntrackExporter struct {
 	ctMaps ctmap.CTMaps
 	logger *slog.Logger
 
-	clock    common.BPFClock
-	inFlight atomic.Bool
+	clock         common.BPFClock
+	inFlight      atomic.Bool
+	ctRateLimiter *rate.Limiter
 }
 
 func newConntrackExporter(
@@ -36,11 +38,16 @@ func newConntrackExporter(
 		// The dump is still useful without the wall-clock timestamps.
 		log.Warn("Failed to determine clock source", slog.String("error", err.Error()))
 	}
+	var rateLimiter *rate.Limiter
+	if cfg.ConntrackRateLimit > 0 {
+		rateLimiter = rate.NewLimiter(cfg.ConntrackRateLimit, 1)
+	}
 	return &ConntrackExporter{
-		cfg:    cfg,
-		ctMaps: ctMaps,
-		logger: log,
-		clock:  clock,
+		cfg:           cfg,
+		ctMaps:        ctMaps,
+		logger:        log,
+		clock:         clock,
+		ctRateLimiter: rateLimiter,
 	}
 }
 
@@ -55,6 +62,9 @@ func (c *ConntrackExporter) GetConntrackEntries(ctx context.Context, req *observ
 		return common.ErrExportInProgress
 	}
 	defer c.inFlight.Store(false)
+	if c.cfg.ConntrackRateLimit > 0 && !c.ctRateLimiter.Allow() {
+		return common.ErrExportRateLimitExceeded
+	}
 
 	var n uint64
 
