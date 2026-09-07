@@ -262,6 +262,9 @@ func (s *Server) GetConntrackEntries(req *observerpb.GetConntrackEntriesRequest,
 	entries := make(chan *observerpb.GetConntrackEntriesResponse, 100)
 
 	for _, p := range s.peers.List() {
+		if nodeName := req.GetNodeName(); nodeName != "" && p.Name != nodeName {
+			continue
+		}
 		if !isAvailable(p.Conn) {
 			s.opts.log.Info(
 				"No connection to peer, skipping",
