@@ -26,6 +26,7 @@ import (
 	"github.com/cilium/cilium/pkg/hubble/dropeventemitter"
 	"github.com/cilium/cilium/pkg/hubble/exporter"
 	exportercell "github.com/cilium/cilium/pkg/hubble/exporter/cell"
+	"github.com/cilium/cilium/pkg/hubble/mapexporter"
 	"github.com/cilium/cilium/pkg/hubble/metrics"
 	"github.com/cilium/cilium/pkg/hubble/monitor"
 	"github.com/cilium/cilium/pkg/hubble/observer"
@@ -64,6 +65,7 @@ type hubbleIntegration struct {
 	nodeLocalStore    *node.LocalNodeStore
 	monitorAgent      monitorAgent.Agent
 	tlsConfigPromise  tlsConfigPromise
+	mapExporter       mapexporter.Exporter
 	exporters         []exporter.FlowLogExporter
 
 	// dropEventEmitter emits Kubernetes events for packet drops.
@@ -92,6 +94,7 @@ func createHubbleIntegration(
 	nodeLocalStore *node.LocalNodeStore,
 	monitorAgent monitorAgent.Agent,
 	tlsConfigPromise tlsConfigPromise,
+	mapExporter mapexporter.Exporter,
 	observerOptions []observeroption.Option,
 	exporterBuilders []*exportercell.FlowLogExporterBuilder,
 	dropEventEmitter dropeventemitter.FlowProcessor,
@@ -122,6 +125,7 @@ func createHubbleIntegration(
 		nodeLocalStore:       nodeLocalStore,
 		monitorAgent:         monitorAgent,
 		tlsConfigPromise:     tlsConfigPromise,
+		mapExporter:          mapExporter,
 		observerOptions:      observerOptions,
 		exporters:            exporters,
 		dropEventEmitter:     dropEventEmitter,
@@ -268,6 +272,7 @@ func (h *hubbleIntegration) launch(ctx context.Context) (*observer.LocalObserver
 	hubbleObserver, err := observer.NewLocalServer(
 		h.payloadParser,
 		h.nsManager,
+		h.mapExporter,
 		h.log,
 		observerOpts...,
 	)

@@ -5,12 +5,15 @@ package observer
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	grpcStatus "google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/timestamppb"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 
 	observerpb "github.com/cilium/cilium/api/v1/observer"
@@ -20,6 +23,7 @@ import (
 	poolTypes "github.com/cilium/cilium/pkg/hubble/relay/pool/types"
 	"github.com/cilium/cilium/pkg/lock"
 	"github.com/cilium/cilium/pkg/logging/logfields"
+	nodeTypes "github.com/cilium/cilium/pkg/node/types"
 	"github.com/cilium/cilium/pkg/time"
 )
 
@@ -240,6 +244,111 @@ func (s *Server) GetNamespaces(ctx context.Context, req *observerpb.GetNamespace
 	}
 
 	return &observerpb.GetNamespacesResponse{Namespaces: nsManager.GetNamespaces()}, nil
+}
+
+// GetConntrackEntries implements observerpb.ObserverServer.GetConntrackEntries
+// by fanning out to every hubble peer and forwarding their per-node conntrack
+// entries. Unlike GetFlows, entries are a point-in-time snapshot, so no
+// sorting/aggregation window is needed.
+func (s *Server) GetConntrackEntries(req *observerpb.GetConntrackEntriesRequest, stream observerpb.Observer_GetConntrackEntriesServer) error {
+	ctx := stream.Context()
+	if md, ok := metadata.FromIncomingContext(ctx); ok {
+		ctx = metadata.NewOutgoingContext(ctx, md)
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	g, gctx := errgroup.WithContext(ctx)
+	entries := make(chan *observerpb.GetConntrackEntriesResponse, 100)
+
+	for _, p := range s.peers.List() {
+		if !isAvailable(p.Conn) {
+			s.opts.log.Info(
+				"No connection to peer, skipping",
+				logfields.Address, p.Address,
+				logfields.Peer, p.Name,
+			)
+			continue
+		}
+
+		g.Go(func() error {
+			client := s.opts.ocb.observerClient(&p)
+			peerStream, err := client.GetConntrackEntries(gctx, req)
+			if err != nil {
+				s.opts.log.Warn(
+					"Failed to start conntrack dump",
+					logfields.Error, err,
+					logfields.Peer, p.Name,
+				)
+				select {
+				case entries <- conntrackNodeStatusError(err, p.Name):
+				case <-gctx.Done():
+				}
+				return nil
+			}
+			for {
+				resp, err := peerStream.Recv()
+				if errors.Is(err, io.EOF) {
+					return nil
+				}
+				if err != nil {
+					s.opts.log.Warn(
+						"Failed to receive conntrack entry",
+						logfields.Error, err,
+						logfields.Peer, p.Name,
+					)
+					select {
+					case entries <- conntrackNodeStatusError(err, p.Name):
+					case <-gctx.Done():
+					}
+					return nil
+				}
+				select {
+				case entries <- resp:
+				case <-gctx.Done():
+					return gctx.Err()
+				}
+			}
+		})
+	}
+
+	var gErr error
+	go func() {
+		gErr = g.Wait()
+		close(entries)
+	}()
+
+	for resp := range entries {
+		if err := stream.Send(resp); err != nil {
+			cancel()
+			return err
+		}
+	}
+
+	return gErr
+}
+
+// conntrackNodeStatusError wraps err into a GetConntrackEntriesResponse
+// reporting a NODE_ERROR for nodeName, so a per-peer failure (e.g. the
+// node's own conntrack export being rate-limited or disabled) reaches the
+// client instead of only being logged by relay.
+func conntrackNodeStatusError(err error, nodeName string) *observerpb.GetConntrackEntriesResponse {
+	msg := err.Error()
+	if s, ok := grpcStatus.FromError(err); ok && s.Code() == codes.Unknown {
+		msg = s.Message()
+	}
+
+	return &observerpb.GetConntrackEntriesResponse{
+		NodeName: nodeTypes.GetAbsoluteNodeName(),
+		Time:     timestamppb.New(time.Now()),
+		ResponseTypes: &observerpb.GetConntrackEntriesResponse_NodeStatus{
+			NodeStatus: &relaypb.NodeStatusEvent{
+				StateChange: relaypb.NodeState_NODE_ERROR,
+				NodeNames:   []string{nodeName},
+				Message:     msg,
+			},
+		},
+	}
 }
 
 // ServerStatus implements observerpb.ObserverServer.ServerStatus by aggregating

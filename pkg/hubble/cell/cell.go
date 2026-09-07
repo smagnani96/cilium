@@ -17,6 +17,7 @@ import (
 	"github.com/cilium/cilium/pkg/endpointmanager"
 	"github.com/cilium/cilium/pkg/hubble/dropeventemitter"
 	exportercell "github.com/cilium/cilium/pkg/hubble/exporter/cell"
+	"github.com/cilium/cilium/pkg/hubble/mapexporter"
 	"github.com/cilium/cilium/pkg/hubble/metrics"
 	metricscell "github.com/cilium/cilium/pkg/hubble/metrics/cell"
 	"github.com/cilium/cilium/pkg/hubble/observer/namespace"
@@ -49,6 +50,9 @@ var Cell = cell.Module(
 
 	// Hubble flow log exporters
 	exportercell.Cell,
+
+	// On-demand dumps of datapath maps (conntrack, ...)
+	mapexporter.Cell,
 
 	// Metrics server and flow processor
 	metricscell.Cell,
@@ -90,6 +94,7 @@ type hubbleParams struct {
 	CGroupManager     manager.CGroupManager
 	NodeLocalStore    *node.LocalNodeStore
 	MonitorAgent      monitorAgent.Agent
+	MapExporter       mapexporter.Exporter
 
 	TLSConfigPromise tlsConfigPromise
 
@@ -124,6 +129,7 @@ func newHubbleIntegration(params hubbleParams) (HubbleIntegration, error) {
 		params.NodeLocalStore,
 		params.MonitorAgent,
 		params.TLSConfigPromise,
+		params.MapExporter,
 		params.ObserverOptions,
 		params.ExporterBuilders,
 		params.DropEventEmitter,

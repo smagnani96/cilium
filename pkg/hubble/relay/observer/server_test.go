@@ -28,6 +28,7 @@ import (
 	observerpb "github.com/cilium/cilium/api/v1/observer"
 	relaypb "github.com/cilium/cilium/api/v1/relay"
 	"github.com/cilium/cilium/pkg/hubble/defaults"
+	"github.com/cilium/cilium/pkg/hubble/mapexporter/common"
 	peerTypes "github.com/cilium/cilium/pkg/hubble/peer/types"
 	poolTypes "github.com/cilium/cilium/pkg/hubble/relay/pool/types"
 	"github.com/cilium/cilium/pkg/hubble/testutils"
@@ -1509,6 +1510,206 @@ func TestServerStatus(t *testing.T) {
 			out := buf.String()
 			for _, msg := range tt.want.log {
 				assert.Contains(t, out, msg)
+			}
+		})
+	}
+}
+
+func TestGetConntrackEntries_PeerError(t *testing.T) {
+	peers := []poolTypes.Peer{
+		{
+			Peer: peerTypes.Peer{
+				Name:    "ok",
+				Address: &net.TCPAddr{IP: net.ParseIP("192.0.2.1"), Port: defaults.ServerPort},
+			},
+			Conn: &testutils.FakeClientConn{OnGetState: func() connectivity.State { return connectivity.Ready }},
+		},
+		{
+			Peer: peerTypes.Peer{
+				Name:    "bad",
+				Address: &net.TCPAddr{IP: net.ParseIP("192.0.2.2"), Port: defaults.ServerPort},
+			},
+			Conn: &testutils.FakeClientConn{OnGetState: func() connectivity.State { return connectivity.Ready }},
+		},
+	}
+
+	ocb := fakeObserverClientBuilder{
+		onObserverClient: func(p *poolTypes.Peer) observerpb.ObserverClient {
+			return &testutils.FakeObserverClient{
+				OnGetConntrackEntries: func(_ context.Context, _ *observerpb.GetConntrackEntriesRequest, _ ...grpc.CallOption) (observerpb.Observer_GetConntrackEntriesClient, error) {
+					if p.Name == "bad" {
+						return nil, status.Error(codes.Unavailable, common.ErrExporterDisabled.Error())
+					}
+					var sent bool
+					return &testutils.FakeGetConntrackEntriesClient{
+						OnRecv: func() (*observerpb.GetConntrackEntriesResponse, error) {
+							if sent {
+								return nil, io.EOF
+							}
+							sent = true
+							return &observerpb.GetConntrackEntriesResponse{NodeName: p.Name}, nil
+						},
+					}, nil
+				},
+			}
+		},
+	}
+
+	logger := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
+	srv, err := NewServer(
+		&testutils.FakePeerLister{OnList: func() []poolTypes.Peer { return peers }},
+		WithLogger(logger),
+		withObserverClientBuilder(ocb),
+	)
+	require.NoError(t, err)
+
+	var got []*observerpb.GetConntrackEntriesResponse
+	stream := &testutils.FakeGetConntrackEntriesServer{
+		FakeGRPCServerStream: &testutils.FakeGRPCServerStream{OnContext: context.TODO},
+		OnSend: func(resp *observerpb.GetConntrackEntriesResponse) error {
+			got = append(got, resp)
+			return nil
+		},
+	}
+
+	err = srv.GetConntrackEntries(&observerpb.GetConntrackEntriesRequest{}, stream)
+	require.NoError(t, err)
+
+	var entries []*observerpb.GetConntrackEntriesResponse
+	var statuses []*relaypb.NodeStatusEvent
+	for _, resp := range got {
+		if ns := resp.GetNodeStatus(); ns != nil {
+			statuses = append(statuses, ns)
+			continue
+		}
+		entries = append(entries, resp)
+	}
+
+	if diff := cmp.Diff(
+		[]*observerpb.GetConntrackEntriesResponse{{NodeName: "ok"}},
+		entries,
+		cmpopts.IgnoreUnexported(observerpb.GetConntrackEntriesResponse{}),
+	); diff != "" {
+		t.Errorf("entries mismatch (-want +got):\n%s", diff)
+	}
+
+	require.Len(t, statuses, 1)
+	assert.Equal(t, relaypb.NodeState_NODE_ERROR, statuses[0].GetStateChange())
+	assert.Equal(t, []string{"bad"}, statuses[0].GetNodeNames())
+	assert.Contains(t, statuses[0].GetMessage(), common.ErrExporterDisabled.Error())
+}
+
+func TestGetConntrackEntries(t *testing.T) {
+	peers := func() []poolTypes.Peer {
+		return []poolTypes.Peer{
+			{
+				Peer: peerTypes.Peer{
+					Name: "one",
+					Address: &net.TCPAddr{
+						IP:   net.ParseIP("192.0.2.1"),
+						Port: defaults.ServerPort,
+					},
+				},
+				Conn: &testutils.FakeClientConn{
+					OnGetState: func() connectivity.State {
+						return connectivity.Ready
+					},
+				},
+			},
+			{
+				Peer: peerTypes.Peer{
+					Name: "two",
+					Address: &net.TCPAddr{
+						IP:   net.ParseIP("192.0.2.2"),
+						Port: defaults.ServerPort,
+					},
+				},
+				Conn: &testutils.FakeClientConn{
+					OnGetState: func() connectivity.State {
+						return connectivity.Ready
+					},
+				},
+			},
+		}
+	}
+	type want struct {
+		entries []*observerpb.GetConntrackEntriesResponse
+		err     error
+	}
+	// onClientFor returns an observerClientBuilder whose GetConntrackEntries
+	// answers with a single entry tagged with the peer's own name, and
+	// panics if invoked for a peer name in skip.
+	onClientFor := func(skip ...string) observerClientBuilder {
+		return fakeObserverClientBuilder{
+			onObserverClient: func(p *poolTypes.Peer) observerpb.ObserverClient {
+				for _, name := range skip {
+					if p.Name == name {
+						panic("peer " + name + " should have been filtered out before being dialed")
+					}
+				}
+				return &testutils.FakeObserverClient{
+					OnGetConntrackEntries: func(_ context.Context, _ *observerpb.GetConntrackEntriesRequest, _ ...grpc.CallOption) (observerpb.Observer_GetConntrackEntriesClient, error) {
+						var sent bool
+						return &testutils.FakeGetConntrackEntriesClient{
+							OnRecv: func() (*observerpb.GetConntrackEntriesResponse, error) {
+								if sent {
+									return nil, io.EOF
+								}
+								sent = true
+								return &observerpb.GetConntrackEntriesResponse{NodeName: p.Name}, nil
+							},
+						}, nil
+					},
+				}
+			},
+		}
+	}
+	tests := []struct {
+		name string
+		plr  PeerLister
+		ocb  observerClientBuilder
+		req  *observerpb.GetConntrackEntriesRequest
+		want want
+	}{
+		{
+			name: "no node filter dumps every peer",
+			plr:  &testutils.FakePeerLister{OnList: peers},
+			ocb:  onClientFor(),
+			req:  &observerpb.GetConntrackEntriesRequest{},
+			want: want{
+				entries: []*observerpb.GetConntrackEntriesResponse{
+					{NodeName: "one"},
+					{NodeName: "two"},
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			logger := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
+			srv, err := NewServer(
+				tt.plr,
+				WithLogger(logger),
+				withObserverClientBuilder(tt.ocb),
+			)
+			assert.NoError(t, err)
+
+			var got []*observerpb.GetConntrackEntriesResponse
+			stream := &testutils.FakeGetConntrackEntriesServer{
+				FakeGRPCServerStream: &testutils.FakeGRPCServerStream{OnContext: context.TODO},
+				OnSend: func(resp *observerpb.GetConntrackEntriesResponse) error {
+					got = append(got, resp)
+					return nil
+				},
+			}
+
+			err = srv.GetConntrackEntries(tt.req, stream)
+			assert.Equal(t, tt.want.err, err)
+			if diff := cmp.Diff(tt.want.entries, got, cmpopts.SortSlices(func(a, b *observerpb.GetConntrackEntriesResponse) bool {
+				return a.GetNodeName() < b.GetNodeName()
+			}), cmpopts.IgnoreUnexported(observerpb.GetConntrackEntriesResponse{})); diff != "" {
+				t.Errorf("entries mismatch (-want +got):\n%s", diff)
 			}
 		})
 	}

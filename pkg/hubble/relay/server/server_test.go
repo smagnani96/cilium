@@ -145,8 +145,8 @@ func TestServerStopReturnsServe(t *testing.T) {
 func newHubbleObserver(t testing.TB, nodeName string, numFlows int) *observer.LocalObserverServer {
 	queueSize := numFlows
 
-	pp, nm := noopParser(t), testutils.NoopNamespaceManager
-	s, err := observer.NewLocalServer(pp, nm, log,
+	pp, nm, me := noopParser(t), testutils.NoopNamespaceManager, testutils.NoopMapExporter
+	s, err := observer.NewLocalServer(pp, nm, me, log,
 		observeroption.WithMaxFlows(container.Capacity65535),
 		observeroption.WithMonitorBuffer(queueSize),
 	)

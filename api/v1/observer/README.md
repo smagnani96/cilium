@@ -4,9 +4,14 @@
 ## Table of Contents
 
 - [observer/observer.proto](#observer_observer-proto)
+    - [ConntrackEntry](#observer-ConntrackEntry)
+    - [ConntrackEntryFlags](#observer-ConntrackEntryFlags)
+    - [ConntrackEntryTCP](#observer-ConntrackEntryTCP)
     - [ExportEvent](#observer-ExportEvent)
     - [GetAgentEventsRequest](#observer-GetAgentEventsRequest)
     - [GetAgentEventsResponse](#observer-GetAgentEventsResponse)
+    - [GetConntrackEntriesRequest](#observer-GetConntrackEntriesRequest)
+    - [GetConntrackEntriesResponse](#observer-GetConntrackEntriesResponse)
     - [GetDebugEventsRequest](#observer-GetDebugEventsRequest)
     - [GetDebugEventsResponse](#observer-GetDebugEventsResponse)
     - [GetFlowsRequest](#observer-GetFlowsRequest)
@@ -32,6 +37,77 @@
 <p align="right"><a href="#top">Top</a></p>
 
 ## observer/observer.proto
+
+
+
+<a name="observer-ConntrackEntry"></a>
+
+### ConntrackEntry
+ConntrackEntry is an entry from a node&#39;s datapath conntrack
+map (see pkg/maps/ctmap).
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| source_ip | [string](#string) |  |  |
+| destination_ip | [string](#string) |  |  |
+| source_port | [uint32](#uint32) |  |  |
+| destination_port | [uint32](#uint32) |  |  |
+| protocol | [uint32](#uint32) |  | IP protocol number (e.g. 6 for TCP, 17 for UDP). |
+| direction | [flow.TrafficDirection](#flow-TrafficDirection) |  |  |
+| packets | [uint64](#uint64) |  |  |
+| bytes | [uint64](#uint64) |  |  |
+| expires_at | [google.protobuf.Timestamp](#google-protobuf-Timestamp) |  | expires_at is the wall-clock time at which this entry is expected to expire. The datapath itself only records this in kernel-clock units local to this node (see pkg/maps/timestamp) with no shared reference an external reader could interpret, so it&#39;s converted to wall-clock time here, using this node&#39;s clock source at read time. Unset if the conversion failed. |
+| flags | [ConntrackEntryFlags](#observer-ConntrackEntryFlags) |  | flags carried by this entry, decoded from struct ct_entry&#39;s flags bitfield (bpf/lib/conntrack.h). |
+| tcp | [ConntrackEntryTCP](#observer-ConntrackEntryTCP) |  | tcp holds TCP-specific state. Unset for non-TCP entries (see struct ct_entry in bpf/lib/conntrack.h). |
+| last_tx_report_at | [google.protobuf.Timestamp](#google-protobuf-Timestamp) |  | last_tx_report_at/last_rx_report_at are the wall-clock times of the last transmit/receive TCP flag report for this entry, converted the same way as expires_at. Unset if the conversion failed. |
+| last_rx_report_at | [google.protobuf.Timestamp](#google-protobuf-Timestamp) |  |  |
+| related | [bool](#bool) |  | related reports whether this entry belongs to a connection related to another one (e.g. an ICMP error referencing a different connection). |
+| service_entry | [bool](#bool) |  | service_entry reports whether this entry&#39;s tuple was recorded for a load-balanced service connection. |
+
+
+
+
+
+
+<a name="observer-ConntrackEntryFlags"></a>
+
+### ConntrackEntryFlags
+ConntrackEntryFlags exposes struct ct_entry&#39;s per-connection state flags
+(bpf/lib/conntrack.h) as named booleans.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| rx_closing | [bool](#bool) |  |  |
+| tx_closing | [bool](#bool) |  |  |
+| lb_loopback | [bool](#bool) |  |  |
+| seen_non_syn | [bool](#bool) |  |  |
+| node_port | [bool](#bool) |  |  |
+| proxy_redirect | [bool](#bool) |  |  |
+| dsr_internal | [bool](#bool) |  |  |
+| from_l7lb | [bool](#bool) |  |  |
+| from_tunnel | [bool](#bool) |  |  |
+
+
+
+
+
+
+<a name="observer-ConntrackEntryTCP"></a>
+
+### ConntrackEntryTCP
+ConntrackEntryTCP holds TCP-specific per-connection state, only set on
+ConntrackEntry.tcp for entries with protocol == TCP.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| tx_flags_seen | [uint32](#uint32) |  | tx_flags_seen/rx_flags_seen are the bitwise-OR of every TCP flags byte seen on transmit/receive for this connection (see struct ct_entry in bpf/lib/conntrack.h). |
+| rx_flags_seen | [uint32](#uint32) |  |  |
+
+
+
 
 
 
@@ -87,6 +163,41 @@ GetAgentEventsResponse contains an event received from the Cilium agent.
 | agent_event | [flow.AgentEvent](#flow-AgentEvent) |  |  |
 | node_name | [string](#string) |  | Name of the node where this event was observed. |
 | time | [google.protobuf.Timestamp](#google-protobuf-Timestamp) |  | Timestamp at which this event was observed. |
+
+
+
+
+
+
+<a name="observer-GetConntrackEntriesRequest"></a>
+
+### GetConntrackEntriesRequest
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| number | [uint64](#uint64) |  | Maximum number of entries that should be returned. 0 means no limit. |
+
+
+
+
+
+
+<a name="observer-GetConntrackEntriesResponse"></a>
+
+### GetConntrackEntriesResponse
+GetConntrackEntriesResponse contains either a single conntrack entry read
+from the node&#39;s datapath conntrack maps, or a status update about one of
+the nodes participating in the request.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| entry | [ConntrackEntry](#observer-ConntrackEntry) |  |  |
+| node_status | [relay.NodeStatusEvent](#relay-NodeStatusEvent) |  | node_status informs clients about the state of the nodes participating in this particular GetConntrackEntries request. Only sent by Hubble Relay, e.g. when a node&#39;s own GetConntrackEntries call failed (see relay.NodeState.NODE_ERROR). |
+| node_name | [string](#string) |  | Name of the node where this entry was observed. |
+| time | [google.protobuf.Timestamp](#google-protobuf-Timestamp) |  | Timestamp at which this entry was read from the datapath. |
 
 
 
@@ -341,6 +452,7 @@ to observe.
 | GetNodes | [GetNodesRequest](#observer-GetNodesRequest) | [GetNodesResponse](#observer-GetNodesResponse) | GetNodes returns information about nodes in a cluster. |
 | GetNamespaces | [GetNamespacesRequest](#observer-GetNamespacesRequest) | [GetNamespacesResponse](#observer-GetNamespacesResponse) | GetNamespaces returns information about namespaces in a cluster. The namespaces returned are namespaces which have had network flows in the last hour. The namespaces are returned sorted by cluster name and namespace in ascending order. |
 | ServerStatus | [ServerStatusRequest](#observer-ServerStatusRequest) | [ServerStatusResponse](#observer-ServerStatusResponse) | ServerStatus returns some details about the running hubble server. |
+| GetConntrackEntries | [GetConntrackEntriesRequest](#observer-GetConntrackEntriesRequest) | [GetConntrackEntriesResponse](#observer-GetConntrackEntriesResponse) stream | GetConntrackEntries returns the connection tracking entries currently present in the node&#39;s datapath conntrack maps. Because the underlying maps are LRU-based, the result is a best-effort snapshot: entries may be evicted or added while it is being produced. |
 
  
 

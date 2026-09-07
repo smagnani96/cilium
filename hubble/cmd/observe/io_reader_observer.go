@@ -70,6 +70,11 @@ func (o *IOReaderObserver) GetNamespaces(_ context.Context, _ *observerpb.GetNam
 	return nil, status.Errorf(codes.Unimplemented, "GetNamespaces not implemented")
 }
 
+// GetConntrackEntries is not implemented, and will throw an error if used.
+func (o *IOReaderObserver) GetConntrackEntries(_ context.Context, _ *observerpb.GetConntrackEntriesRequest, _ ...grpc.CallOption) (observerpb.Observer_GetConntrackEntriesClient, error) {
+	return nil, status.Errorf(codes.Unimplemented, "GetConntrackEntries not implemented")
+}
+
 // ioReaderClient implements Observer_GetFlowsClient.
 type ioReaderClient struct {
 	grpc.ClientStream

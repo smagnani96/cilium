@@ -23,6 +23,8 @@ import (
 	"github.com/cilium/cilium/pkg/hubble/build"
 	"github.com/cilium/cilium/pkg/hubble/container"
 	"github.com/cilium/cilium/pkg/hubble/filters"
+	"github.com/cilium/cilium/pkg/hubble/mapexporter"
+	"github.com/cilium/cilium/pkg/hubble/mapexporter/common"
 	"github.com/cilium/cilium/pkg/hubble/observer/namespace"
 	"github.com/cilium/cilium/pkg/hubble/observer/observeroption"
 	observerTypes "github.com/cilium/cilium/pkg/hubble/observer/types"
@@ -67,12 +69,15 @@ type LocalObserverServer struct {
 	numObservedFlows atomic.Uint64
 
 	nsManager namespace.Manager
+
+	mapExporter mapexporter.Exporter
 }
 
 // NewLocalServer returns a new local observer server.
 func NewLocalServer(
 	payloadParser parser.Decoder,
 	nsManager namespace.Manager,
+	mapExporter mapexporter.Exporter,
 	logger *slog.Logger,
 	options ...observeroption.Option,
 ) (*LocalObserverServer, error) {
@@ -98,6 +103,7 @@ func NewLocalServer(
 		payloadParser: payloadParser,
 		startTime:     time.Now(),
 		nsManager:     nsManager,
+		mapExporter:   mapExporter,
 		opts:          opts,
 	}
 
@@ -254,6 +260,35 @@ func (s *LocalObserverServer) GetNodes(ctx context.Context, req *observerpb.GetN
 // GetNamespaces implements observerpb.ObserverClient.GetNamespaces.
 func (s *LocalObserverServer) GetNamespaces(ctx context.Context, req *observerpb.GetNamespacesRequest) (*observerpb.GetNamespacesResponse, error) {
 	return &observerpb.GetNamespacesResponse{Namespaces: s.nsManager.GetNamespaces()}, nil
+}
+
+// GetConntrackEntries implements observerpb.ObserverServer.GetConntrackEntries.
+func (s *LocalObserverServer) GetConntrackEntries(
+	req *observerpb.GetConntrackEntriesRequest,
+	server observerpb.Observer_GetConntrackEntriesServer,
+) error {
+	ctx := server.Context()
+	nodeName := nodeTypes.GetAbsoluteNodeName()
+	dumpTime := timestamppb.New(time.Now())
+
+	var err error
+	err = s.mapExporter.GetConntrackEntries(ctx, req, func(e *observerpb.ConntrackEntry) bool {
+		resp := &observerpb.GetConntrackEntriesResponse{
+			ResponseTypes: &observerpb.GetConntrackEntriesResponse_Entry{Entry: e},
+			NodeName:      nodeName,
+			Time:          dumpTime,
+		}
+		err = server.Send(resp)
+		return err == nil
+	})
+	switch {
+	case errors.Is(err, common.ErrExporterDisabled):
+		return status.Errorf(codes.Unavailable, "conntrack export is disabled")
+	case err != nil:
+		return err
+	default:
+		return ctx.Err()
+	}
 }
 
 // GetFlows implements the proto method for client requests.
