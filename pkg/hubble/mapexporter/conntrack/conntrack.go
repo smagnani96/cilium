@@ -25,7 +25,8 @@ import (
 )
 
 var (
-	ErrExporterEnrichmentDisabled = fmt.Errorf("conntrack enrichment is disabled")
+	ErrExporterEnrichmentDisabled        = fmt.Errorf("conntrack enrichment is disabled")
+	ErrExporterRequestEnrichmentDisabled = fmt.Errorf("cannot apply enriched filter on a non-enriched request")
 )
 
 type ConntrackExporter struct {
@@ -84,6 +85,17 @@ func (c *ConntrackExporter) GetConntrackEntries(ctx context.Context, req *observ
 		return common.ErrExportInProgress
 	}
 	defer c.inFlight.Store(false)
+	ef, err := newEntryFilter(req.GetFilter())
+	if err != nil {
+		return err
+	}
+	enf, err := newEnrichedFilter(req.GetEnrichedFilter())
+	if err != nil {
+		return err
+	}
+	if enf != nil && !req.GetEnrich() {
+		return ErrExporterRequestEnrichmentDisabled
+	}
 	if c.cfg.ConntrackRateLimit > 0 && !c.ctRateLimiter.Allow() {
 		return common.ErrExportRateLimitExceeded
 	}
@@ -92,7 +104,11 @@ func (c *ConntrackExporter) GetConntrackEntries(ctx context.Context, req *observ
 
 	for _, m := range c.ctMaps.ActiveMaps() {
 		err := m.DumpEntries(ctx, func(key ctmap.CtKey, val *ctmap.CtEntry) bool {
-			if !yield(ctEntryToProto(key, val, c.clock, c.cfg.EnableConntrackEnrichment, c.epGetter, c.svcGetter, c.nodeGetter)) {
+			e, ok := ctEntryToProto(key, val, c.clock, c.cfg.EnableConntrackEnrichment, c.epGetter, c.svcGetter, c.nodeGetter, ef, enf)
+			if !ok {
+				return true
+			}
+			if !yield(e) {
 				return false
 			}
 			n++
@@ -107,6 +123,7 @@ func (c *ConntrackExporter) GetConntrackEntries(ctx context.Context, req *observ
 }
 
 // ctEntryToProto converts a raw datapath conntrack entry into its protobuf representation.
+// The returned bool reports whether the entry matches filters.
 func ctEntryToProto(
 	key ctmap.CtKey,
 	entry *ctmap.CtEntry,
@@ -115,7 +132,9 @@ func ctEntryToProto(
 	epGetter resolverTypes.EndpointGetter,
 	svcGetter resolverTypes.ServiceGetter,
 	nodeGetter resolverTypes.NodeGetter,
-) *observerpb.ConntrackEntry {
+	filter *entryFilter,
+	enrichedFilter *enrichedFilter,
+) (*observerpb.ConntrackEntry, bool) {
 	e := &observerpb.ConntrackEntry{
 		Packets:        entry.Packets,
 		Bytes:          entry.Bytes,
@@ -146,7 +165,7 @@ func ctEntryToProto(
 		tupleFlags = k.Flags
 		isIPv6 = true
 	default:
-		return e
+		return e, filter.match(e)
 	}
 
 	e.SourceIp = srcAddr.String()
@@ -166,9 +185,14 @@ func ctEntryToProto(
 	e.Related = tupleFlags&ctmap.TUPLE_F_RELATED != 0
 	e.ServiceEntry = tupleFlags&ctmap.TUPLE_F_SERVICE != 0
 
+	// Apply the filter so non-matching entries skip it entirely.
+	if !filter.match(e) {
+		return e, false
+	}
+
 	// If enrichment is not requested, return early.
 	if !enrich {
-		return e
+		return e, true
 	}
 
 	// Empty datapath context. We resolve purely by using the legit
@@ -203,7 +227,7 @@ func ctEntryToProto(
 		}
 	}
 
-	return e
+	return e, enrichedFilter.match(e)
 }
 
 // ctEntryFlagsToProto converts the conntrack entry flags from the datapath

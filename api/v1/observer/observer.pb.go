@@ -1558,9 +1558,17 @@ type GetConntrackEntriesRequest struct {
 	// enrich requests identity, namespace, pod name, service, and node-name
 	// enrichment for the returned entries. Has no effect if the agent's own
 	// hubble-enable-conntrack-enrichment flag is disabled. Defaults to false.
-	Enrich        bool `protobuf:"varint,3,opt,name=enrich,proto3" json:"enrich,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Enrich bool `protobuf:"varint,3,opt,name=enrich,proto3" json:"enrich,omitempty"`
+	// filter, if set, restricts the dump to entries matching every field set
+	// on it.
+	Filter *ConntrackFilter `protobuf:"bytes,4,opt,name=filter,proto3" json:"filter,omitempty"`
+	// enriched_filter, if set, restricts the dump to entries matching every
+	// field set on it. Unlike filter, its fields are only populated by
+	// enrichment, so setting any of them enables enrichment for this request
+	// even if enrich is false.
+	EnrichedFilter *ConntrackEnrichedFilter `protobuf:"bytes,5,opt,name=enriched_filter,json=enrichedFilter,proto3" json:"enriched_filter,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *GetConntrackEntriesRequest) Reset() {
@@ -1614,6 +1622,208 @@ func (x *GetConntrackEntriesRequest) GetEnrich() bool {
 	return false
 }
 
+func (x *GetConntrackEntriesRequest) GetFilter() *ConntrackFilter {
+	if x != nil {
+		return x.Filter
+	}
+	return nil
+}
+
+func (x *GetConntrackEntriesRequest) GetEnrichedFilter() *ConntrackEnrichedFilter {
+	if x != nil {
+		return x.EnrichedFilter
+	}
+	return nil
+}
+
+// ConntrackEnrichedFilter restricts a GetConntrackEntries dump to entries
+// matching every field set on it (fields left unset/empty are not filtered
+// on). Where a field is repeated, an entry matches if it equals any one of
+// the given values. Every field requires enrichment to be populated.
+type ConntrackEnrichedFilter struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// source_identity matches an entry's source security identity.
+	SourceIdentity []uint32 `protobuf:"varint,1,rep,packed,name=source_identity,json=sourceIdentity,proto3" json:"source_identity,omitempty"`
+	// destination_identity matches an entry's destination security identity.
+	DestinationIdentity []uint32 `protobuf:"varint,2,rep,packed,name=destination_identity,json=destinationIdentity,proto3" json:"destination_identity,omitempty"`
+	// source_pod matches an entry's source pod name, optionally within a
+	// given namespace, following the same convention as
+	// flow.FlowFilter.source_pod (e.g. "xwing", "kube-system/coredns-",
+	// "kube-system/", "/xwing").
+	SourcePod []string `protobuf:"bytes,3,rep,name=source_pod,json=sourcePod,proto3" json:"source_pod,omitempty"`
+	// destination_pod matches an entry's destination pod name, following the
+	// same convention as source_pod.
+	DestinationPod []string `protobuf:"bytes,4,rep,name=destination_pod,json=destinationPod,proto3" json:"destination_pod,omitempty"`
+	// service matches an entry's resolved service name, following the same
+	// convention as source_pod (e.g. "default/kubernetes").
+	Service       []string `protobuf:"bytes,5,rep,name=service,proto3" json:"service,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ConntrackEnrichedFilter) Reset() {
+	*x = ConntrackEnrichedFilter{}
+	mi := &file_observer_observer_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ConntrackEnrichedFilter) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ConntrackEnrichedFilter) ProtoMessage() {}
+
+func (x *ConntrackEnrichedFilter) ProtoReflect() protoreflect.Message {
+	mi := &file_observer_observer_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ConntrackEnrichedFilter.ProtoReflect.Descriptor instead.
+func (*ConntrackEnrichedFilter) Descriptor() ([]byte, []int) {
+	return file_observer_observer_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *ConntrackEnrichedFilter) GetSourceIdentity() []uint32 {
+	if x != nil {
+		return x.SourceIdentity
+	}
+	return nil
+}
+
+func (x *ConntrackEnrichedFilter) GetDestinationIdentity() []uint32 {
+	if x != nil {
+		return x.DestinationIdentity
+	}
+	return nil
+}
+
+func (x *ConntrackEnrichedFilter) GetSourcePod() []string {
+	if x != nil {
+		return x.SourcePod
+	}
+	return nil
+}
+
+func (x *ConntrackEnrichedFilter) GetDestinationPod() []string {
+	if x != nil {
+		return x.DestinationPod
+	}
+	return nil
+}
+
+func (x *ConntrackEnrichedFilter) GetService() []string {
+	if x != nil {
+		return x.Service
+	}
+	return nil
+}
+
+// ConntrackFilter restricts a GetConntrackEntries dump to entries matching
+// every field set on it (fields left unset/empty are not filtered on). Where
+// a field is repeated, an entry matches if it equals any one of the given
+// values.
+type ConntrackFilter struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// source_ip matches an entry's source address against each value, which
+	// may be an exact IP address (e.g. "10.0.0.1") or a CIDR range
+	// (e.g. "10.0.0.0/24").
+	SourceIp []string `protobuf:"bytes,1,rep,name=source_ip,json=sourceIp,proto3" json:"source_ip,omitempty"`
+	// destination_ip matches an entry's destination address the same way
+	// source_ip does.
+	DestinationIp []string `protobuf:"bytes,2,rep,name=destination_ip,json=destinationIp,proto3" json:"destination_ip,omitempty"`
+	// source_port matches an entry's source port.
+	SourcePort []uint32 `protobuf:"varint,3,rep,packed,name=source_port,json=sourcePort,proto3" json:"source_port,omitempty"`
+	// destination_port matches an entry's destination port.
+	DestinationPort []uint32 `protobuf:"varint,4,rep,packed,name=destination_port,json=destinationPort,proto3" json:"destination_port,omitempty"`
+	// protocol matches an entry's IP protocol number (e.g. 6 for TCP, 17 for
+	// UDP).
+	Protocol []uint32 `protobuf:"varint,5,rep,packed,name=protocol,proto3" json:"protocol,omitempty"`
+	// direction matches an entry's traffic direction.
+	Direction     []flow.TrafficDirection `protobuf:"varint,6,rep,packed,name=direction,proto3,enum=flow.TrafficDirection" json:"direction,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ConntrackFilter) Reset() {
+	*x = ConntrackFilter{}
+	mi := &file_observer_observer_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ConntrackFilter) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ConntrackFilter) ProtoMessage() {}
+
+func (x *ConntrackFilter) ProtoReflect() protoreflect.Message {
+	mi := &file_observer_observer_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ConntrackFilter.ProtoReflect.Descriptor instead.
+func (*ConntrackFilter) Descriptor() ([]byte, []int) {
+	return file_observer_observer_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *ConntrackFilter) GetSourceIp() []string {
+	if x != nil {
+		return x.SourceIp
+	}
+	return nil
+}
+
+func (x *ConntrackFilter) GetDestinationIp() []string {
+	if x != nil {
+		return x.DestinationIp
+	}
+	return nil
+}
+
+func (x *ConntrackFilter) GetSourcePort() []uint32 {
+	if x != nil {
+		return x.SourcePort
+	}
+	return nil
+}
+
+func (x *ConntrackFilter) GetDestinationPort() []uint32 {
+	if x != nil {
+		return x.DestinationPort
+	}
+	return nil
+}
+
+func (x *ConntrackFilter) GetProtocol() []uint32 {
+	if x != nil {
+		return x.Protocol
+	}
+	return nil
+}
+
+func (x *ConntrackFilter) GetDirection() []flow.TrafficDirection {
+	if x != nil {
+		return x.Direction
+	}
+	return nil
+}
+
 // GetConntrackEntriesResponse contains either a single conntrack entry read
 // from the node's datapath conntrack maps, or a status update about one of
 // the nodes participating in the request.
@@ -1634,7 +1844,7 @@ type GetConntrackEntriesResponse struct {
 
 func (x *GetConntrackEntriesResponse) Reset() {
 	*x = GetConntrackEntriesResponse{}
-	mi := &file_observer_observer_proto_msgTypes[16]
+	mi := &file_observer_observer_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1646,7 +1856,7 @@ func (x *GetConntrackEntriesResponse) String() string {
 func (*GetConntrackEntriesResponse) ProtoMessage() {}
 
 func (x *GetConntrackEntriesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_observer_observer_proto_msgTypes[16]
+	mi := &file_observer_observer_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1659,7 +1869,7 @@ func (x *GetConntrackEntriesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetConntrackEntriesResponse.ProtoReflect.Descriptor instead.
 func (*GetConntrackEntriesResponse) Descriptor() ([]byte, []int) {
-	return file_observer_observer_proto_rawDescGZIP(), []int{16}
+	return file_observer_observer_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *GetConntrackEntriesResponse) GetResponseTypes() isGetConntrackEntriesResponse_ResponseTypes {
@@ -1779,7 +1989,7 @@ type ConntrackEntry struct {
 
 func (x *ConntrackEntry) Reset() {
 	*x = ConntrackEntry{}
-	mi := &file_observer_observer_proto_msgTypes[17]
+	mi := &file_observer_observer_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1791,7 +2001,7 @@ func (x *ConntrackEntry) String() string {
 func (*ConntrackEntry) ProtoMessage() {}
 
 func (x *ConntrackEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_observer_observer_proto_msgTypes[17]
+	mi := &file_observer_observer_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1804,7 +2014,7 @@ func (x *ConntrackEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConntrackEntry.ProtoReflect.Descriptor instead.
 func (*ConntrackEntry) Descriptor() ([]byte, []int) {
-	return file_observer_observer_proto_rawDescGZIP(), []int{17}
+	return file_observer_observer_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *ConntrackEntry) GetSourceIp() string {
@@ -1969,7 +2179,7 @@ type ConntrackEntryTCP struct {
 
 func (x *ConntrackEntryTCP) Reset() {
 	*x = ConntrackEntryTCP{}
-	mi := &file_observer_observer_proto_msgTypes[18]
+	mi := &file_observer_observer_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1981,7 +2191,7 @@ func (x *ConntrackEntryTCP) String() string {
 func (*ConntrackEntryTCP) ProtoMessage() {}
 
 func (x *ConntrackEntryTCP) ProtoReflect() protoreflect.Message {
-	mi := &file_observer_observer_proto_msgTypes[18]
+	mi := &file_observer_observer_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1994,7 +2204,7 @@ func (x *ConntrackEntryTCP) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConntrackEntryTCP.ProtoReflect.Descriptor instead.
 func (*ConntrackEntryTCP) Descriptor() ([]byte, []int) {
-	return file_observer_observer_proto_rawDescGZIP(), []int{18}
+	return file_observer_observer_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *ConntrackEntryTCP) GetTxFlagsSeen() uint32 {
@@ -2030,7 +2240,7 @@ type ConntrackEntryFlags struct {
 
 func (x *ConntrackEntryFlags) Reset() {
 	*x = ConntrackEntryFlags{}
-	mi := &file_observer_observer_proto_msgTypes[19]
+	mi := &file_observer_observer_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2042,7 +2252,7 @@ func (x *ConntrackEntryFlags) String() string {
 func (*ConntrackEntryFlags) ProtoMessage() {}
 
 func (x *ConntrackEntryFlags) ProtoReflect() protoreflect.Message {
-	mi := &file_observer_observer_proto_msgTypes[19]
+	mi := &file_observer_observer_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2055,7 +2265,7 @@ func (x *ConntrackEntryFlags) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConntrackEntryFlags.ProtoReflect.Descriptor instead.
 func (*ConntrackEntryFlags) Descriptor() ([]byte, []int) {
-	return file_observer_observer_proto_rawDescGZIP(), []int{19}
+	return file_observer_observer_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *ConntrackEntryFlags) GetRxClosing() bool {
@@ -2143,7 +2353,7 @@ type ExportEvent struct {
 
 func (x *ExportEvent) Reset() {
 	*x = ExportEvent{}
-	mi := &file_observer_observer_proto_msgTypes[20]
+	mi := &file_observer_observer_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2155,7 +2365,7 @@ func (x *ExportEvent) String() string {
 func (*ExportEvent) ProtoMessage() {}
 
 func (x *ExportEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_observer_observer_proto_msgTypes[20]
+	mi := &file_observer_observer_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2168,7 +2378,7 @@ func (x *ExportEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExportEvent.ProtoReflect.Descriptor instead.
 func (*ExportEvent) Descriptor() ([]byte, []int) {
-	return file_observer_observer_proto_rawDescGZIP(), []int{20}
+	return file_observer_observer_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *ExportEvent) GetResponseTypes() isExportEvent_ResponseTypes {
@@ -2288,7 +2498,7 @@ type GetFlowsRequest_Experimental struct {
 
 func (x *GetFlowsRequest_Experimental) Reset() {
 	*x = GetFlowsRequest_Experimental{}
-	mi := &file_observer_observer_proto_msgTypes[21]
+	mi := &file_observer_observer_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2300,7 +2510,7 @@ func (x *GetFlowsRequest_Experimental) String() string {
 func (*GetFlowsRequest_Experimental) ProtoMessage() {}
 
 func (x *GetFlowsRequest_Experimental) ProtoReflect() protoreflect.Message {
-	mi := &file_observer_observer_proto_msgTypes[21]
+	mi := &file_observer_observer_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2407,11 +2617,28 @@ const file_observer_observer_proto_rawDesc = "" +
 	"namespaces\"C\n" +
 	"\tNamespace\x12\x18\n" +
 	"\acluster\x18\x01 \x01(\tR\acluster\x12\x1c\n" +
-	"\tnamespace\x18\x02 \x01(\tR\tnamespace\"i\n" +
+	"\tnamespace\x18\x02 \x01(\tR\tnamespace\"\xe8\x01\n" +
 	"\x1aGetConntrackEntriesRequest\x12\x16\n" +
 	"\x06number\x18\x01 \x01(\x04R\x06number\x12\x1b\n" +
 	"\tnode_name\x18\x02 \x01(\tR\bnodeName\x12\x16\n" +
-	"\x06enrich\x18\x03 \x01(\bR\x06enrich\"\xeb\x01\n" +
+	"\x06enrich\x18\x03 \x01(\bR\x06enrich\x121\n" +
+	"\x06filter\x18\x04 \x01(\v2\x19.observer.ConntrackFilterR\x06filter\x12J\n" +
+	"\x0fenriched_filter\x18\x05 \x01(\v2!.observer.ConntrackEnrichedFilterR\x0eenrichedFilter\"\xd7\x01\n" +
+	"\x17ConntrackEnrichedFilter\x12'\n" +
+	"\x0fsource_identity\x18\x01 \x03(\rR\x0esourceIdentity\x121\n" +
+	"\x14destination_identity\x18\x02 \x03(\rR\x13destinationIdentity\x12\x1d\n" +
+	"\n" +
+	"source_pod\x18\x03 \x03(\tR\tsourcePod\x12'\n" +
+	"\x0fdestination_pod\x18\x04 \x03(\tR\x0edestinationPod\x12\x18\n" +
+	"\aservice\x18\x05 \x03(\tR\aservice\"\xf3\x01\n" +
+	"\x0fConntrackFilter\x12\x1b\n" +
+	"\tsource_ip\x18\x01 \x03(\tR\bsourceIp\x12%\n" +
+	"\x0edestination_ip\x18\x02 \x03(\tR\rdestinationIp\x12\x1f\n" +
+	"\vsource_port\x18\x03 \x03(\rR\n" +
+	"sourcePort\x12)\n" +
+	"\x10destination_port\x18\x04 \x03(\rR\x0fdestinationPort\x12\x1a\n" +
+	"\bprotocol\x18\x05 \x03(\rR\bprotocol\x124\n" +
+	"\tdirection\x18\x06 \x03(\x0e2\x16.flow.TrafficDirectionR\tdirection\"\xeb\x01\n" +
 	"\x1bGetConntrackEntriesResponse\x120\n" +
 	"\x05entry\x18\x01 \x01(\v2\x18.observer.ConntrackEntryH\x00R\x05entry\x129\n" +
 	"\vnode_status\x18\x02 \x01(\v2\x16.relay.NodeStatusEventH\x00R\n" +
@@ -2497,7 +2724,7 @@ func file_observer_observer_proto_rawDescGZIP() []byte {
 	return file_observer_observer_proto_rawDescData
 }
 
-var file_observer_observer_proto_msgTypes = make([]protoimpl.MessageInfo, 22)
+var file_observer_observer_proto_msgTypes = make([]protoimpl.MessageInfo, 24)
 var file_observer_observer_proto_goTypes = []any{
 	(*ServerStatusRequest)(nil),          // 0: observer.ServerStatusRequest
 	(*ServerStatusResponse)(nil),         // 1: observer.ServerStatusResponse
@@ -2515,91 +2742,96 @@ var file_observer_observer_proto_goTypes = []any{
 	(*GetNamespacesResponse)(nil),        // 13: observer.GetNamespacesResponse
 	(*Namespace)(nil),                    // 14: observer.Namespace
 	(*GetConntrackEntriesRequest)(nil),   // 15: observer.GetConntrackEntriesRequest
-	(*GetConntrackEntriesResponse)(nil),  // 16: observer.GetConntrackEntriesResponse
-	(*ConntrackEntry)(nil),               // 17: observer.ConntrackEntry
-	(*ConntrackEntryTCP)(nil),            // 18: observer.ConntrackEntryTCP
-	(*ConntrackEntryFlags)(nil),          // 19: observer.ConntrackEntryFlags
-	(*ExportEvent)(nil),                  // 20: observer.ExportEvent
-	(*GetFlowsRequest_Experimental)(nil), // 21: observer.GetFlowsRequest.Experimental
-	(*wrapperspb.UInt32Value)(nil),       // 22: google.protobuf.UInt32Value
-	(*flow.FlowFilter)(nil),              // 23: flow.FlowFilter
-	(*timestamppb.Timestamp)(nil),        // 24: google.protobuf.Timestamp
-	(*fieldmaskpb.FieldMask)(nil),        // 25: google.protobuf.FieldMask
-	(*anypb.Any)(nil),                    // 26: google.protobuf.Any
-	(*flow.Flow)(nil),                    // 27: flow.Flow
-	(*relay.NodeStatusEvent)(nil),        // 28: relay.NodeStatusEvent
-	(*flow.LostEvent)(nil),               // 29: flow.LostEvent
-	(*flow.AgentEvent)(nil),              // 30: flow.AgentEvent
-	(*flow.DebugEvent)(nil),              // 31: flow.DebugEvent
-	(relay.NodeState)(0),                 // 32: relay.NodeState
-	(flow.TrafficDirection)(0),           // 33: flow.TrafficDirection
-	(*flow.Endpoint)(nil),                // 34: flow.Endpoint
-	(*flow.Service)(nil),                 // 35: flow.Service
+	(*ConntrackEnrichedFilter)(nil),      // 16: observer.ConntrackEnrichedFilter
+	(*ConntrackFilter)(nil),              // 17: observer.ConntrackFilter
+	(*GetConntrackEntriesResponse)(nil),  // 18: observer.GetConntrackEntriesResponse
+	(*ConntrackEntry)(nil),               // 19: observer.ConntrackEntry
+	(*ConntrackEntryTCP)(nil),            // 20: observer.ConntrackEntryTCP
+	(*ConntrackEntryFlags)(nil),          // 21: observer.ConntrackEntryFlags
+	(*ExportEvent)(nil),                  // 22: observer.ExportEvent
+	(*GetFlowsRequest_Experimental)(nil), // 23: observer.GetFlowsRequest.Experimental
+	(*wrapperspb.UInt32Value)(nil),       // 24: google.protobuf.UInt32Value
+	(*flow.FlowFilter)(nil),              // 25: flow.FlowFilter
+	(*timestamppb.Timestamp)(nil),        // 26: google.protobuf.Timestamp
+	(*fieldmaskpb.FieldMask)(nil),        // 27: google.protobuf.FieldMask
+	(*anypb.Any)(nil),                    // 28: google.protobuf.Any
+	(*flow.Flow)(nil),                    // 29: flow.Flow
+	(*relay.NodeStatusEvent)(nil),        // 30: relay.NodeStatusEvent
+	(*flow.LostEvent)(nil),               // 31: flow.LostEvent
+	(*flow.AgentEvent)(nil),              // 32: flow.AgentEvent
+	(*flow.DebugEvent)(nil),              // 33: flow.DebugEvent
+	(relay.NodeState)(0),                 // 34: relay.NodeState
+	(flow.TrafficDirection)(0),           // 35: flow.TrafficDirection
+	(*flow.Endpoint)(nil),                // 36: flow.Endpoint
+	(*flow.Service)(nil),                 // 37: flow.Service
 }
 var file_observer_observer_proto_depIdxs = []int32{
-	22, // 0: observer.ServerStatusResponse.num_connected_nodes:type_name -> google.protobuf.UInt32Value
-	22, // 1: observer.ServerStatusResponse.num_unavailable_nodes:type_name -> google.protobuf.UInt32Value
-	23, // 2: observer.GetFlowsRequest.blacklist:type_name -> flow.FlowFilter
-	23, // 3: observer.GetFlowsRequest.whitelist:type_name -> flow.FlowFilter
-	24, // 4: observer.GetFlowsRequest.since:type_name -> google.protobuf.Timestamp
-	24, // 5: observer.GetFlowsRequest.until:type_name -> google.protobuf.Timestamp
-	25, // 6: observer.GetFlowsRequest.field_mask:type_name -> google.protobuf.FieldMask
-	21, // 7: observer.GetFlowsRequest.experimental:type_name -> observer.GetFlowsRequest.Experimental
-	26, // 8: observer.GetFlowsRequest.extensions:type_name -> google.protobuf.Any
-	27, // 9: observer.GetFlowsResponse.flow:type_name -> flow.Flow
-	28, // 10: observer.GetFlowsResponse.node_status:type_name -> relay.NodeStatusEvent
-	29, // 11: observer.GetFlowsResponse.lost_events:type_name -> flow.LostEvent
-	24, // 12: observer.GetFlowsResponse.time:type_name -> google.protobuf.Timestamp
-	24, // 13: observer.GetAgentEventsRequest.since:type_name -> google.protobuf.Timestamp
-	24, // 14: observer.GetAgentEventsRequest.until:type_name -> google.protobuf.Timestamp
-	30, // 15: observer.GetAgentEventsResponse.agent_event:type_name -> flow.AgentEvent
-	24, // 16: observer.GetAgentEventsResponse.time:type_name -> google.protobuf.Timestamp
-	24, // 17: observer.GetDebugEventsRequest.since:type_name -> google.protobuf.Timestamp
-	24, // 18: observer.GetDebugEventsRequest.until:type_name -> google.protobuf.Timestamp
-	31, // 19: observer.GetDebugEventsResponse.debug_event:type_name -> flow.DebugEvent
-	24, // 20: observer.GetDebugEventsResponse.time:type_name -> google.protobuf.Timestamp
+	24, // 0: observer.ServerStatusResponse.num_connected_nodes:type_name -> google.protobuf.UInt32Value
+	24, // 1: observer.ServerStatusResponse.num_unavailable_nodes:type_name -> google.protobuf.UInt32Value
+	25, // 2: observer.GetFlowsRequest.blacklist:type_name -> flow.FlowFilter
+	25, // 3: observer.GetFlowsRequest.whitelist:type_name -> flow.FlowFilter
+	26, // 4: observer.GetFlowsRequest.since:type_name -> google.protobuf.Timestamp
+	26, // 5: observer.GetFlowsRequest.until:type_name -> google.protobuf.Timestamp
+	27, // 6: observer.GetFlowsRequest.field_mask:type_name -> google.protobuf.FieldMask
+	23, // 7: observer.GetFlowsRequest.experimental:type_name -> observer.GetFlowsRequest.Experimental
+	28, // 8: observer.GetFlowsRequest.extensions:type_name -> google.protobuf.Any
+	29, // 9: observer.GetFlowsResponse.flow:type_name -> flow.Flow
+	30, // 10: observer.GetFlowsResponse.node_status:type_name -> relay.NodeStatusEvent
+	31, // 11: observer.GetFlowsResponse.lost_events:type_name -> flow.LostEvent
+	26, // 12: observer.GetFlowsResponse.time:type_name -> google.protobuf.Timestamp
+	26, // 13: observer.GetAgentEventsRequest.since:type_name -> google.protobuf.Timestamp
+	26, // 14: observer.GetAgentEventsRequest.until:type_name -> google.protobuf.Timestamp
+	32, // 15: observer.GetAgentEventsResponse.agent_event:type_name -> flow.AgentEvent
+	26, // 16: observer.GetAgentEventsResponse.time:type_name -> google.protobuf.Timestamp
+	26, // 17: observer.GetDebugEventsRequest.since:type_name -> google.protobuf.Timestamp
+	26, // 18: observer.GetDebugEventsRequest.until:type_name -> google.protobuf.Timestamp
+	33, // 19: observer.GetDebugEventsResponse.debug_event:type_name -> flow.DebugEvent
+	26, // 20: observer.GetDebugEventsResponse.time:type_name -> google.protobuf.Timestamp
 	10, // 21: observer.GetNodesResponse.nodes:type_name -> observer.Node
-	32, // 22: observer.Node.state:type_name -> relay.NodeState
+	34, // 22: observer.Node.state:type_name -> relay.NodeState
 	11, // 23: observer.Node.tls:type_name -> observer.TLS
 	14, // 24: observer.GetNamespacesResponse.namespaces:type_name -> observer.Namespace
-	17, // 25: observer.GetConntrackEntriesResponse.entry:type_name -> observer.ConntrackEntry
-	28, // 26: observer.GetConntrackEntriesResponse.node_status:type_name -> relay.NodeStatusEvent
-	24, // 27: observer.GetConntrackEntriesResponse.time:type_name -> google.protobuf.Timestamp
-	33, // 28: observer.ConntrackEntry.direction:type_name -> flow.TrafficDirection
-	24, // 29: observer.ConntrackEntry.expires_at:type_name -> google.protobuf.Timestamp
-	19, // 30: observer.ConntrackEntry.flags:type_name -> observer.ConntrackEntryFlags
-	18, // 31: observer.ConntrackEntry.tcp:type_name -> observer.ConntrackEntryTCP
-	24, // 32: observer.ConntrackEntry.last_tx_report_at:type_name -> google.protobuf.Timestamp
-	24, // 33: observer.ConntrackEntry.last_rx_report_at:type_name -> google.protobuf.Timestamp
-	34, // 34: observer.ConntrackEntry.source:type_name -> flow.Endpoint
-	34, // 35: observer.ConntrackEntry.destination:type_name -> flow.Endpoint
-	35, // 36: observer.ConntrackEntry.service:type_name -> flow.Service
-	34, // 37: observer.ConntrackEntry.backend:type_name -> flow.Endpoint
-	27, // 38: observer.ExportEvent.flow:type_name -> flow.Flow
-	28, // 39: observer.ExportEvent.node_status:type_name -> relay.NodeStatusEvent
-	29, // 40: observer.ExportEvent.lost_events:type_name -> flow.LostEvent
-	30, // 41: observer.ExportEvent.agent_event:type_name -> flow.AgentEvent
-	31, // 42: observer.ExportEvent.debug_event:type_name -> flow.DebugEvent
-	24, // 43: observer.ExportEvent.time:type_name -> google.protobuf.Timestamp
-	2,  // 44: observer.Observer.GetFlows:input_type -> observer.GetFlowsRequest
-	4,  // 45: observer.Observer.GetAgentEvents:input_type -> observer.GetAgentEventsRequest
-	6,  // 46: observer.Observer.GetDebugEvents:input_type -> observer.GetDebugEventsRequest
-	8,  // 47: observer.Observer.GetNodes:input_type -> observer.GetNodesRequest
-	12, // 48: observer.Observer.GetNamespaces:input_type -> observer.GetNamespacesRequest
-	0,  // 49: observer.Observer.ServerStatus:input_type -> observer.ServerStatusRequest
-	15, // 50: observer.Observer.GetConntrackEntries:input_type -> observer.GetConntrackEntriesRequest
-	3,  // 51: observer.Observer.GetFlows:output_type -> observer.GetFlowsResponse
-	5,  // 52: observer.Observer.GetAgentEvents:output_type -> observer.GetAgentEventsResponse
-	7,  // 53: observer.Observer.GetDebugEvents:output_type -> observer.GetDebugEventsResponse
-	9,  // 54: observer.Observer.GetNodes:output_type -> observer.GetNodesResponse
-	13, // 55: observer.Observer.GetNamespaces:output_type -> observer.GetNamespacesResponse
-	1,  // 56: observer.Observer.ServerStatus:output_type -> observer.ServerStatusResponse
-	16, // 57: observer.Observer.GetConntrackEntries:output_type -> observer.GetConntrackEntriesResponse
-	51, // [51:58] is the sub-list for method output_type
-	44, // [44:51] is the sub-list for method input_type
-	44, // [44:44] is the sub-list for extension type_name
-	44, // [44:44] is the sub-list for extension extendee
-	0,  // [0:44] is the sub-list for field type_name
+	17, // 25: observer.GetConntrackEntriesRequest.filter:type_name -> observer.ConntrackFilter
+	16, // 26: observer.GetConntrackEntriesRequest.enriched_filter:type_name -> observer.ConntrackEnrichedFilter
+	35, // 27: observer.ConntrackFilter.direction:type_name -> flow.TrafficDirection
+	19, // 28: observer.GetConntrackEntriesResponse.entry:type_name -> observer.ConntrackEntry
+	30, // 29: observer.GetConntrackEntriesResponse.node_status:type_name -> relay.NodeStatusEvent
+	26, // 30: observer.GetConntrackEntriesResponse.time:type_name -> google.protobuf.Timestamp
+	35, // 31: observer.ConntrackEntry.direction:type_name -> flow.TrafficDirection
+	26, // 32: observer.ConntrackEntry.expires_at:type_name -> google.protobuf.Timestamp
+	21, // 33: observer.ConntrackEntry.flags:type_name -> observer.ConntrackEntryFlags
+	20, // 34: observer.ConntrackEntry.tcp:type_name -> observer.ConntrackEntryTCP
+	26, // 35: observer.ConntrackEntry.last_tx_report_at:type_name -> google.protobuf.Timestamp
+	26, // 36: observer.ConntrackEntry.last_rx_report_at:type_name -> google.protobuf.Timestamp
+	36, // 37: observer.ConntrackEntry.source:type_name -> flow.Endpoint
+	36, // 38: observer.ConntrackEntry.destination:type_name -> flow.Endpoint
+	37, // 39: observer.ConntrackEntry.service:type_name -> flow.Service
+	36, // 40: observer.ConntrackEntry.backend:type_name -> flow.Endpoint
+	29, // 41: observer.ExportEvent.flow:type_name -> flow.Flow
+	30, // 42: observer.ExportEvent.node_status:type_name -> relay.NodeStatusEvent
+	31, // 43: observer.ExportEvent.lost_events:type_name -> flow.LostEvent
+	32, // 44: observer.ExportEvent.agent_event:type_name -> flow.AgentEvent
+	33, // 45: observer.ExportEvent.debug_event:type_name -> flow.DebugEvent
+	26, // 46: observer.ExportEvent.time:type_name -> google.protobuf.Timestamp
+	2,  // 47: observer.Observer.GetFlows:input_type -> observer.GetFlowsRequest
+	4,  // 48: observer.Observer.GetAgentEvents:input_type -> observer.GetAgentEventsRequest
+	6,  // 49: observer.Observer.GetDebugEvents:input_type -> observer.GetDebugEventsRequest
+	8,  // 50: observer.Observer.GetNodes:input_type -> observer.GetNodesRequest
+	12, // 51: observer.Observer.GetNamespaces:input_type -> observer.GetNamespacesRequest
+	0,  // 52: observer.Observer.ServerStatus:input_type -> observer.ServerStatusRequest
+	15, // 53: observer.Observer.GetConntrackEntries:input_type -> observer.GetConntrackEntriesRequest
+	3,  // 54: observer.Observer.GetFlows:output_type -> observer.GetFlowsResponse
+	5,  // 55: observer.Observer.GetAgentEvents:output_type -> observer.GetAgentEventsResponse
+	7,  // 56: observer.Observer.GetDebugEvents:output_type -> observer.GetDebugEventsResponse
+	9,  // 57: observer.Observer.GetNodes:output_type -> observer.GetNodesResponse
+	13, // 58: observer.Observer.GetNamespaces:output_type -> observer.GetNamespacesResponse
+	1,  // 59: observer.Observer.ServerStatus:output_type -> observer.ServerStatusResponse
+	18, // 60: observer.Observer.GetConntrackEntries:output_type -> observer.GetConntrackEntriesResponse
+	54, // [54:61] is the sub-list for method output_type
+	47, // [47:54] is the sub-list for method input_type
+	47, // [47:47] is the sub-list for extension type_name
+	47, // [47:47] is the sub-list for extension extendee
+	0,  // [0:47] is the sub-list for field type_name
 }
 
 func init() { file_observer_observer_proto_init() }
@@ -2612,11 +2844,11 @@ func file_observer_observer_proto_init() {
 		(*GetFlowsResponse_NodeStatus)(nil),
 		(*GetFlowsResponse_LostEvents)(nil),
 	}
-	file_observer_observer_proto_msgTypes[16].OneofWrappers = []any{
+	file_observer_observer_proto_msgTypes[18].OneofWrappers = []any{
 		(*GetConntrackEntriesResponse_Entry)(nil),
 		(*GetConntrackEntriesResponse_NodeStatus)(nil),
 	}
-	file_observer_observer_proto_msgTypes[20].OneofWrappers = []any{
+	file_observer_observer_proto_msgTypes[22].OneofWrappers = []any{
 		(*ExportEvent_Flow)(nil),
 		(*ExportEvent_NodeStatus)(nil),
 		(*ExportEvent_LostEvents)(nil),
@@ -2629,7 +2861,7 @@ func file_observer_observer_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_observer_observer_proto_rawDesc), len(file_observer_observer_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   22,
+			NumMessages:   24,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
