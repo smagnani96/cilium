@@ -98,6 +98,18 @@ func TestConntrackExporter_API(t *testing.T) {
 	c = newConntrackExporter(Config{EnableConntrack: false, ConntrackRateLimit: 30 * time.Second}, &mockCTMaps{}, hivetest.Logger(t), nil, nil, nil)
 	err = c.GetConntrackEntries(t.Context(), &observerpb.GetConntrackEntriesRequest{}, nil)
 	require.ErrorIs(t, err, common.ErrExporterDisabled)
+
+	c = newConntrackExporter(Config{EnableConntrack: true, ConntrackRateLimit: 0}, &mockCTMaps{}, hivetest.Logger(t), nil, nil, nil)
+	err = c.GetConntrackEntries(t.Context(), &observerpb.GetConntrackEntriesRequest{
+		Filter: &observerpb.ConntrackFilter{SourceIp: []string{"not-an-ip"}},
+	}, nil)
+	require.Error(t, err)
+
+	c = newConntrackExporter(Config{EnableConntrack: true, ConntrackRateLimit: 0}, &mockCTMaps{}, hivetest.Logger(t), nil, nil, nil)
+	err = c.GetConntrackEntries(t.Context(), &observerpb.GetConntrackEntriesRequest{
+		EnrichedFilter: &observerpb.ConntrackEnrichedFilter{SourcePod: []string{""}},
+	}, nil)
+	require.Error(t, err)
 }
 
 func TestConntrackExporter_Conversion(t *testing.T) {
@@ -183,8 +195,9 @@ func TestConntrackExporter_Conversion(t *testing.T) {
 			},
 		}
 
-		got := ctEntryToProto(s.key, entry, clock, true, epGetter, svcGetter, nodeGetter)
+		got, matched := ctEntryToProto(s.key, entry, clock, true, epGetter, svcGetter, nodeGetter, nil, nil)
 		require.NotNil(t, got)
+		require.True(t, matched)
 
 		assert.Equal(t, saddr, got.SourceIp)
 		assert.Equal(t, daddr, got.DestinationIp)
@@ -238,8 +251,44 @@ func TestConntrackExporter_Conversion(t *testing.T) {
 		assert.Empty(t, got.DestinationNodeName)
 		assert.Equal(t, nodeName, got.SourceNodeName)
 
-		got = ctEntryToProto(s.key, entry, clock, false, epGetter, svcGetter, nodeGetter)
+		got, _ = ctEntryToProto(s.key, entry, clock, false, epGetter, svcGetter, nodeGetter, nil, nil)
 		require.Nil(t, got.Source)
 		require.Nil(t, got.Destination)
+
+		ef, err := newEntryFilter(&observerpb.ConntrackFilter{SourceIp: []string{saddr}})
+		require.NoError(t, err)
+		got, matched = ctEntryToProto(s.key, entry, clock, true, epGetter, svcGetter, nodeGetter, ef, nil)
+		require.True(t, matched)
+		require.True(t, ef.match(got))
+		require.NotNil(t, got.Source)
+		require.NotNil(t, got.Destination)
+
+		ef, err = newEntryFilter(&observerpb.ConntrackFilter{SourceIp: []string{daddr}})
+		require.NoError(t, err)
+		got, matched = ctEntryToProto(s.key, entry, clock, true, epGetter, svcGetter, nodeGetter, ef, nil)
+		require.False(t, matched)
+		require.False(t, ef.match(got))
+		require.Nil(t, got.Source)
+		require.Nil(t, got.Destination)
+
+		enf, err := newEnrichedFilter(&observerpb.ConntrackEnrichedFilter{SourcePod: []string{"/" + sPodName}})
+		require.NoError(t, err)
+		got, matched = ctEntryToProto(s.key, entry, clock, true, epGetter, svcGetter, nodeGetter, nil, enf)
+		require.True(t, enf.match(got))
+
+		enf, err = newEnrichedFilter(&observerpb.ConntrackEnrichedFilter{SourcePod: []string{"/" + dPodName}})
+		require.NoError(t, err)
+		got, matched = ctEntryToProto(s.key, entry, clock, true, epGetter, svcGetter, nodeGetter, nil, enf)
+		require.False(t, enf.match(got))
+
+		enf, err = newEnrichedFilter(&observerpb.ConntrackEnrichedFilter{Service: []string{"/" + svcName}})
+		require.NoError(t, err)
+		got, matched = ctEntryToProto(s.key, entry, clock, true, epGetter, svcGetter, nodeGetter, nil, enf)
+		require.True(t, enf.match(got))
+
+		enf, err = newEnrichedFilter(&observerpb.ConntrackEnrichedFilter{SourceIdentity: []uint32{1}})
+		require.NoError(t, err)
+		got, matched = ctEntryToProto(s.key, entry, clock, true, epGetter, svcGetter, nodeGetter, nil, enf)
+		require.False(t, enf.match(got))
 	}
 }

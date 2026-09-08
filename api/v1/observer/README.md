@@ -4,9 +4,11 @@
 ## Table of Contents
 
 - [observer/observer.proto](#observer_observer-proto)
+    - [ConntrackEnrichedFilter](#observer-ConntrackEnrichedFilter)
     - [ConntrackEntry](#observer-ConntrackEntry)
     - [ConntrackEntryFlags](#observer-ConntrackEntryFlags)
     - [ConntrackEntryTCP](#observer-ConntrackEntryTCP)
+    - [ConntrackFilter](#observer-ConntrackFilter)
     - [ExportEvent](#observer-ExportEvent)
     - [GetAgentEventsRequest](#observer-GetAgentEventsRequest)
     - [GetAgentEventsResponse](#observer-GetAgentEventsResponse)
@@ -37,6 +39,28 @@
 <p align="right"><a href="#top">Top</a></p>
 
 ## observer/observer.proto
+
+
+
+<a name="observer-ConntrackEnrichedFilter"></a>
+
+### ConntrackEnrichedFilter
+ConntrackEnrichedFilter restricts a GetConntrackEntries dump to entries
+matching every field set on it (fields left unset/empty are not filtered
+on). Where a field is repeated, an entry matches if it equals any one of
+the given values. Every field requires enrichment to be populated.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| source_identity | [uint32](#uint32) | repeated | source_identity matches an entry&#39;s source security identity. |
+| destination_identity | [uint32](#uint32) | repeated | destination_identity matches an entry&#39;s destination security identity. |
+| source_pod | [string](#string) | repeated | source_pod matches an entry&#39;s source pod name, optionally within a given namespace, following the same convention as flow.FlowFilter.source_pod (e.g. &#34;xwing&#34;, &#34;kube-system/coredns-&#34;, &#34;kube-system/&#34;, &#34;/xwing&#34;). |
+| destination_pod | [string](#string) | repeated | destination_pod matches an entry&#39;s destination pod name, following the same convention as source_pod. |
+| service | [string](#string) | repeated | service matches an entry&#39;s resolved service name, following the same convention as source_pod (e.g. &#34;default/kubernetes&#34;). |
+
+
+
 
 
 
@@ -117,6 +141,29 @@ ConntrackEntry.tcp for entries with protocol == TCP.
 
 
 
+<a name="observer-ConntrackFilter"></a>
+
+### ConntrackFilter
+ConntrackFilter restricts a GetConntrackEntries dump to entries matching
+every field set on it (fields left unset/empty are not filtered on). Where
+a field is repeated, an entry matches if it equals any one of the given
+values.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| source_ip | [string](#string) | repeated | source_ip matches an entry&#39;s source address against each value, which may be an exact IP address (e.g. &#34;10.0.0.1&#34;) or a CIDR range (e.g. &#34;10.0.0.0/24&#34;). |
+| destination_ip | [string](#string) | repeated | destination_ip matches an entry&#39;s destination address the same way source_ip does. |
+| source_port | [uint32](#uint32) | repeated | source_port matches an entry&#39;s source port. |
+| destination_port | [uint32](#uint32) | repeated | destination_port matches an entry&#39;s destination port. |
+| protocol | [uint32](#uint32) | repeated | protocol matches an entry&#39;s IP protocol number (e.g. 6 for TCP, 17 for UDP). |
+| direction | [flow.TrafficDirection](#flow-TrafficDirection) | repeated | direction matches an entry&#39;s traffic direction. |
+
+
+
+
+
+
 <a name="observer-ExportEvent"></a>
 
 ### ExportEvent
@@ -186,6 +233,8 @@ GetAgentEventsResponse contains an event received from the Cilium agent.
 | number | [uint64](#uint64) |  | Maximum number of entries that should be returned. 0 means no limit. |
 | node_name | [string](#string) |  | node_name, if set, restricts the dump to the node with this name. |
 | enrich | [bool](#bool) |  | enrich requests identity, namespace, pod name, service, and node-name enrichment for the returned entries. Has no effect if the agent&#39;s own hubble-enable-conntrack-enrichment flag is disabled. Defaults to false. |
+| filter | [ConntrackFilter](#observer-ConntrackFilter) |  | filter, if set, restricts the dump to entries matching every field set on it. |
+| enriched_filter | [ConntrackEnrichedFilter](#observer-ConntrackEnrichedFilter) |  | enriched_filter, if set, restricts the dump to entries matching every field set on it. Unlike filter, its fields are only populated by enrichment, so setting any of them enables enrichment for this request even if enrich is false. |
 
 
 

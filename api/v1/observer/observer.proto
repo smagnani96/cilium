@@ -293,6 +293,59 @@ message GetConntrackEntriesRequest {
     // enrichment for the returned entries. Has no effect if the agent's own
     // hubble-enable-conntrack-enrichment flag is disabled. Defaults to false.
     bool enrich = 3;
+    // filter, if set, restricts the dump to entries matching every field set
+    // on it.
+    ConntrackFilter filter = 4;
+    // enriched_filter, if set, restricts the dump to entries matching every
+    // field set on it. Unlike filter, its fields are only populated by
+    // enrichment, so setting any of them enables enrichment for this request
+    // even if enrich is false.
+    ConntrackEnrichedFilter enriched_filter = 5;
+}
+
+// ConntrackEnrichedFilter restricts a GetConntrackEntries dump to entries
+// matching every field set on it (fields left unset/empty are not filtered
+// on). Where a field is repeated, an entry matches if it equals any one of
+// the given values. Every field requires enrichment to be populated.
+message ConntrackEnrichedFilter {
+    // source_identity matches an entry's source security identity.
+    repeated uint32 source_identity = 1;
+    // destination_identity matches an entry's destination security identity.
+    repeated uint32 destination_identity = 2;
+    // source_pod matches an entry's source pod name, optionally within a
+    // given namespace, following the same convention as
+    // flow.FlowFilter.source_pod (e.g. "xwing", "kube-system/coredns-",
+    // "kube-system/", "/xwing").
+    repeated string source_pod = 3;
+    // destination_pod matches an entry's destination pod name, following the
+    // same convention as source_pod.
+    repeated string destination_pod = 4;
+    // service matches an entry's resolved service name, following the same
+    // convention as source_pod (e.g. "default/kubernetes").
+    repeated string service = 5;
+}
+
+// ConntrackFilter restricts a GetConntrackEntries dump to entries matching
+// every field set on it (fields left unset/empty are not filtered on). Where
+// a field is repeated, an entry matches if it equals any one of the given
+// values.
+message ConntrackFilter {
+    // source_ip matches an entry's source address against each value, which
+    // may be an exact IP address (e.g. "10.0.0.1") or a CIDR range
+    // (e.g. "10.0.0.0/24").
+    repeated string source_ip = 1;
+    // destination_ip matches an entry's destination address the same way
+    // source_ip does.
+    repeated string destination_ip = 2;
+    // source_port matches an entry's source port.
+    repeated uint32 source_port = 3;
+    // destination_port matches an entry's destination port.
+    repeated uint32 destination_port = 4;
+    // protocol matches an entry's IP protocol number (e.g. 6 for TCP, 17 for
+    // UDP).
+    repeated uint32 protocol = 5;
+    // direction matches an entry's traffic direction.
+    repeated flow.TrafficDirection direction = 6;
 }
 
 // GetConntrackEntriesResponse contains either a single conntrack entry read
