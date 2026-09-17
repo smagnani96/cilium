@@ -18,10 +18,12 @@ import (
 	"github.com/spf13/viper"
 	"google.golang.org/grpc"
 
+	flowpb "github.com/cilium/cilium/api/v1/flow"
 	observerpb "github.com/cilium/cilium/api/v1/observer"
 	"github.com/cilium/cilium/hubble/cmd/common/config"
 	"github.com/cilium/cilium/hubble/cmd/common/conn"
 	"github.com/cilium/cilium/hubble/cmd/common/template"
+	"github.com/cilium/cilium/pkg/identity"
 	"github.com/cilium/cilium/pkg/time"
 	"github.com/cilium/cilium/pkg/u8proto"
 )
@@ -129,8 +131,8 @@ func conntrackTableOutput(buf io.Writer, nodes []*nodeConntrack) error {
 		fmt.Fprintln(buf)
 		for _, v := range sortedEntries(n.Entries) {
 			fmt.Fprint(tw,
-				v.GetSourceIp(), "\t",
-				fmt.Sprintf("%s:%d", v.GetDestinationIp(), v.GetDestinationPort()), "\t",
+				fmt.Sprintf("%s %s", v.GetSourceIp(), conntrackEndpointLabel(v.GetSource())), "\t",
+				fmt.Sprintf("%s:%d %s", v.GetDestinationIp(), v.GetDestinationPort(), conntrackEndpointLabel(v.GetDestination())), "\t",
 				conntrackProtocolName(v.GetProtocol()), "\t",
 				v.GetPackets(), "\t",
 				v.GetBytes(), "\t",
@@ -188,4 +190,47 @@ func sortedEntries(entries []*observerpb.ConntrackEntry) []*observerpb.Conntrack
 		return entries[i].GetDestinationPort() < entries[j].GetDestinationPort()
 	})
 	return entries
+}
+
+// conntrackEndpointLabel returns the best human-readable label for the endpoint.
+func conntrackEndpointLabel(ep *flowpb.Endpoint) string {
+	id := conntrackIdentityLabel(ep)
+	name := conntrackEndpointName(ep)
+	if name != "" {
+		return "(" + name + ", identity=" + id + ")"
+	}
+	return ""
+}
+
+// conntrackEndpointName returns the resolved pod/namespace for an endpoint.
+func conntrackEndpointName(ep *flowpb.Endpoint) string {
+	if ep == nil {
+		return ""
+	}
+	if ep.GetPodName() != "" {
+		if ns := ep.GetNamespace(); ns != "" {
+			return ns + "/" + ep.GetPodName()
+		}
+		return ep.GetPodName()
+	}
+	if ep.GetNamespace() != "" {
+		return ep.GetNamespace()
+	}
+	if lbls := ep.GetLabels(); len(lbls) == 1 && strings.HasPrefix(lbls[0], "reserved:") {
+		return lbls[0]
+	}
+	return ""
+}
+
+// conntrackIdentityLabel renders a reserved identity (e.g. 4) by its name
+// (e.g. "health"), using the same convention fmtIdentity uses for `hubble observe`.
+func conntrackIdentityLabel(ep *flowpb.Endpoint) string {
+	if ep == nil || ep.GetIdentity() == 0 {
+		return ""
+	}
+	numeric := identity.NumericIdentity(ep.GetIdentity())
+	if numeric.IsReservedIdentity() {
+		return numeric.String()
+	}
+	return fmt.Sprintf("%d", ep.GetIdentity())
 }

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/cilium/cilium/pkg/hubble/observer/conntrack/types"
+	resolverTypes "github.com/cilium/cilium/pkg/hubble/resolver/types"
 	"github.com/cilium/cilium/pkg/maps/ctmap"
 	"github.com/cilium/cilium/pkg/u8proto"
 	"golang.org/x/sync/singleflight"
@@ -23,9 +24,10 @@ var ErrExporterDisabled = fmt.Errorf("conntrack exporter is disabled")
 
 // ctExporter is responsible for exporting conntrack entries from the datapath.
 type ctExporter struct {
-	cfg    Config
-	ctMaps ctmap.CTMaps
-	logger *slog.Logger
+	cfg      Config
+	ctMaps   ctmap.CTMaps
+	logger   *slog.Logger
+	epGetter resolverTypes.EndpointGetter
 
 	snapshot atomic.Pointer[Snapshot]
 	refresh  singleflight.Group
@@ -46,11 +48,13 @@ func newConntrackExporter(
 	cfg Config,
 	ctMaps ctmap.CTMaps,
 	log *slog.Logger,
+	epGetter resolverTypes.EndpointGetter,
 ) *ctExporter {
 	return &ctExporter{
-		cfg:    cfg,
-		ctMaps: ctMaps,
-		logger: log,
+		cfg:      cfg,
+		ctMaps:   ctMaps,
+		logger:   log,
+		epGetter: epGetter,
 	}
 }
 
@@ -101,7 +105,7 @@ func (c *ctExporter) dumpSnapshot(ctx context.Context) (*types.Snapshot, error) 
 
 	for _, m := range c.ctMaps.ActiveMaps() {
 		err := m.DumpEntries(ctx, func(key ctmap.CtKey, val *ctmap.CtEntry) bool {
-			aggregateCtEntry(entries, key, val)
+			aggregateCtEntry(entries, key, val, c.epGetter)
 			return true
 		})
 		if err != nil {
@@ -158,11 +162,13 @@ func aggregateCtKey(key ctmap.CtKey) (ctAggregationKey, bool) {
 }
 
 // aggregateCtEntry aggregates a single conntrack entry into the provided map
-// using the computed aggregation key.
+// using the computed aggregation key. While aggregating, it computes unresolved
+// data (e.g., endpoint) if needed.
 func aggregateCtEntry(
 	entries map[ctAggregationKey]*observerpb.ConntrackEntry,
 	key ctmap.CtKey,
 	val *ctmap.CtEntry,
+	epGetter resolverTypes.EndpointGetter,
 ) {
 	aggregateKey, ok := aggregateCtKey(key)
 	if !ok {
@@ -176,6 +182,11 @@ func aggregateCtEntry(
 			DestinationIp:   aggregateKey.destinationIP.String(),
 			DestinationPort: uint32(aggregateKey.destinationPort),
 			Protocol:        uint32(aggregateKey.protocol),
+		}
+		if epGetter != nil {
+			dpContext := resolverTypes.DatapathContext{}
+			e.Source = epGetter.ResolveEndpoint(aggregateKey.sourceIP, val.SourceSecurityID, dpContext)
+			e.Destination = epGetter.ResolveEndpoint(aggregateKey.destinationIP, 0, dpContext)
 		}
 		entries[aggregateKey] = e
 	}

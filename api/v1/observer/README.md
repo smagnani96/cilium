@@ -55,6 +55,8 @@ by the 4-tuple consisting of source IP, destination IP, destination port, and pr
 | packets | [uint64](#uint64) |  |  |
 | bytes | [uint64](#uint64) |  |  |
 | count | [uint64](#uint64) |  |  |
+| source | [flow.Endpoint](#flow-Endpoint) |  | source/destination are resolved from Cilium&#39;s identity/endpoint state at read time. Unset if the resolution failed. |
+| destination | [flow.Endpoint](#flow-Endpoint) |  |  |
 
 
 

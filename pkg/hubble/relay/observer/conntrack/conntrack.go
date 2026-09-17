@@ -141,4 +141,11 @@ func aggregateCtEntry(
 	if val.Count > e.Count {
 		e.Count = val.Count
 	}
+	// For the next fields, we only fill them once.
+	if e.GetSource() == nil && val.GetSource() != nil {
+		e.Source = val.GetSource()
+	}
+	if e.GetDestination() == nil && val.GetDestination() != nil {
+		e.Destination = val.GetDestination()
+	}
 }

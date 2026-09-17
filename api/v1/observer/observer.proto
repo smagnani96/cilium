@@ -319,6 +319,11 @@ message ConntrackEntry {
     uint64 packets = 5;
     uint64 bytes = 6;
     uint64 count = 7;
+
+    // source/destination are resolved from Cilium's identity/endpoint
+    // state at read time. Unset if the resolution failed.
+    flow.Endpoint source = 8;
+    flow.Endpoint destination = 9;
 }
 
 // ExportEvent contains an event to be exported. Not to be used outside of the

@@ -4,14 +4,18 @@
 package conntrack
 
 import (
+	"net/netip"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 
+	flowpb "github.com/cilium/cilium/api/v1/flow"
 	observerpb "github.com/cilium/cilium/api/v1/observer"
 	"github.com/cilium/cilium/pkg/byteorder"
+	resolverTypes "github.com/cilium/cilium/pkg/hubble/resolver/types"
+	"github.com/cilium/cilium/pkg/hubble/testutils"
 	"github.com/cilium/cilium/pkg/maps/ctmap"
 	"github.com/cilium/cilium/pkg/tuple"
 	"github.com/cilium/cilium/pkg/types"
@@ -29,7 +33,7 @@ func (m *mockCTMaps) ActiveMaps() []*ctmap.Map {
 }
 
 func TestConntrackExporter_Disabled(t *testing.T) {
-	c := newConntrackExporter(Config{EnableCTSnapshot: false}, &mockCTMaps{}, hivetest.Logger(t))
+	c := newConntrackExporter(Config{EnableCTSnapshot: false}, &mockCTMaps{}, hivetest.Logger(t), nil)
 	snap, err := c.GetConntrackSnapshot(t.Context())
 	require.ErrorIs(t, err, ErrExporterDisabled)
 	require.Nil(t, snap)
@@ -37,7 +41,7 @@ func TestConntrackExporter_Disabled(t *testing.T) {
 
 func TestConntrackExporter_Cache(t *testing.T) {
 	ctMaps := &mockCTMaps{}
-	c := newConntrackExporter(Config{EnableCTSnapshot: true, ConntrackCacheTTL: 10 * time.Second}, ctMaps, hivetest.Logger(t))
+	c := newConntrackExporter(Config{EnableCTSnapshot: true, ConntrackCacheTTL: 10 * time.Second}, ctMaps, hivetest.Logger(t), nil)
 
 	snap1, err := c.GetConntrackSnapshot(t.Context())
 	require.NoError(t, err)
@@ -58,6 +62,27 @@ func TestConntrackExporter_Cache(t *testing.T) {
 
 func TestAggregateCtEntry(t *testing.T) {
 	entries := make(map[ctAggregationKey]*observerpb.ConntrackEntry)
+
+	// Pod names are looked up by the (post-swap) source/destination IP of
+	// each aggregated flow, so every distinct flow below needs a distinct
+	// address to resolve to a distinct, assertable pod name.
+	podNames := map[string]string{
+		"10.0.0.2": "pod-src-v4",
+		"10.0.0.1": "pod-dst-v4",
+		"fd00::1":  "pod-src-v6",
+		"fd00::2":  "pod-dst-v6-b",
+		"fd01::2":  "pod-dst-v6-c",
+	}
+	epGetter := &testutils.FakeEndpointGetter{
+		OnResolveEndpoint: func(ip netip.Addr, _ uint32, _ resolverTypes.DatapathContext) *flowpb.Endpoint {
+			podName, ok := podNames[ip.String()]
+			if !ok {
+				return nil
+			}
+			return &flowpb.Endpoint{PodName: podName}
+		},
+	}
+
 	for _, s := range []struct {
 		record      ctmap.CtMapRecord
 		assertEntry *observerpb.ConntrackEntry
@@ -93,6 +118,8 @@ func TestAggregateCtEntry(t *testing.T) {
 				Packets:         10,
 				Bytes:           2000,
 				Count:           1,
+				Source:          &flowpb.Endpoint{PodName: "pod-src-v4"},
+				Destination:     &flowpb.Endpoint{PodName: "pod-dst-v4"},
 			},
 		},
 		{
@@ -126,6 +153,8 @@ func TestAggregateCtEntry(t *testing.T) {
 				Packets:         110,
 				Bytes:           7000,
 				Count:           2,
+				Source:          &flowpb.Endpoint{PodName: "pod-src-v4"},
+				Destination:     &flowpb.Endpoint{PodName: "pod-dst-v4"},
 			},
 		},
 		{
@@ -157,6 +186,8 @@ func TestAggregateCtEntry(t *testing.T) {
 				Packets:         1,
 				Bytes:           80,
 				Count:           1,
+				Source:          &flowpb.Endpoint{PodName: "pod-src-v6"},
+				Destination:     &flowpb.Endpoint{PodName: "pod-dst-v6-b"},
 			},
 		},
 		{
@@ -188,13 +219,15 @@ func TestAggregateCtEntry(t *testing.T) {
 				Packets:         6,
 				Bytes:           400,
 				Count:           1,
+				Source:          &flowpb.Endpoint{PodName: "pod-src-v6"},
+				Destination:     &flowpb.Endpoint{PodName: "pod-dst-v6-c"},
 			},
 		},
 	} {
 		key, ok := aggregateCtKey(s.record.Key)
 		require.True(t, ok, "failed to aggregate key")
 
-		aggregateCtEntry(entries, s.record.Key, &s.record.Value)
+		aggregateCtEntry(entries, s.record.Key, &s.record.Value, epGetter)
 		e, ok := entries[key]
 		require.True(t, ok, "expected aggregation key not found")
 		require.Equal(t, s.assertEntry.String(), e.String())
