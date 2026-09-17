@@ -8,11 +8,13 @@ import (
 	"fmt"
 	"log/slog"
 	"net/netip"
+	"sync/atomic"
 	"time"
 
 	"github.com/cilium/cilium/pkg/hubble/observer/conntrack/types"
 	"github.com/cilium/cilium/pkg/maps/ctmap"
 	"github.com/cilium/cilium/pkg/u8proto"
+	"golang.org/x/sync/singleflight"
 
 	observerpb "github.com/cilium/cilium/api/v1/observer"
 )
@@ -24,6 +26,9 @@ type ctExporter struct {
 	cfg    Config
 	ctMaps ctmap.CTMaps
 	logger *slog.Logger
+
+	snapshot atomic.Pointer[Snapshot]
+	refresh  singleflight.Group
 }
 
 // ctAggregationKey represents the key used to aggregate conntrack entries.
@@ -56,11 +61,38 @@ func (c *ctExporter) GetConntrackSnapshot(ctx context.Context) (*types.Snapshot,
 		return nil, ErrExporterDisabled
 	}
 
-	snap, err := c.dumpSnapshot(ctx)
+	if snap := c.cachedSnapshot(); snap != nil {
+		return snap, nil
+	}
+
+	v, err, _ := c.refresh.Do("", func() (any, error) {
+		// Someone else may have refreshed it between our check above and
+		// winning the singleflight call.
+		if snap := c.cachedSnapshot(); snap != nil {
+			return snap, nil
+		}
+
+		snap, err := c.dumpSnapshot(ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		c.snapshot.Store(snap)
+		return snap, nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	return snap, nil
+	return v.(*Snapshot), nil
+}
+
+// cachedSnapshot returns the cached snapshot if it is still valid.
+func (c *ctExporter) cachedSnapshot() *Snapshot {
+	snap := c.snapshot.Load()
+	if snap != nil && time.Since(snap.ComputedAt) < c.cfg.ConntrackCacheTTL {
+		return snap
+	}
+	return nil
 }
 
 // dumpSnapshot walks the datapath conntrack maps and creates a new snapshot.

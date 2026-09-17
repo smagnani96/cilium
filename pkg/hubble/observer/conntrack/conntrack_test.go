@@ -6,6 +6,7 @@ package conntrack
 import (
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -36,11 +37,23 @@ func TestConntrackExporter_Disabled(t *testing.T) {
 
 func TestConntrackExporter_Cache(t *testing.T) {
 	ctMaps := &mockCTMaps{}
-	c := newConntrackExporter(Config{EnableCTSnapshot: true}, ctMaps, hivetest.Logger(t))
+	c := newConntrackExporter(Config{EnableCTSnapshot: true, ConntrackCacheTTL: 10 * time.Second}, ctMaps, hivetest.Logger(t))
 
 	snap1, err := c.GetConntrackSnapshot(t.Context())
 	require.NoError(t, err)
 	require.NotNil(t, snap1)
+
+	snap2, err := c.GetConntrackSnapshot(t.Context())
+	require.NoError(t, err)
+	require.Same(t, snap1, snap2, "second call within the TTL should reuse the cached snapshot")
+	require.EqualValues(t, 1, ctMaps.calls.Load())
+
+	c.cfg.ConntrackCacheTTL = 0
+
+	snap3, err := c.GetConntrackSnapshot(t.Context())
+	require.NoError(t, err)
+	require.NotSame(t, snap1, snap3, "call after the TTL has expired should trigger a refresh")
+	require.EqualValues(t, 2, ctMaps.calls.Load())
 }
 
 func TestAggregateCtEntry(t *testing.T) {

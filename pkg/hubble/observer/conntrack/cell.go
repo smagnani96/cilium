@@ -5,6 +5,9 @@ package conntrack
 
 import (
 	"github.com/cilium/cilium/pkg/hubble/observer/conntrack/types"
+
+	"time"
+
 	"github.com/cilium/hive/cell"
 	"github.com/spf13/pflag"
 )
@@ -19,13 +22,16 @@ var Cell = cell.Module(
 )
 
 var defaultConntrackExporterConfig = Config{
-	EnableCTSnapshot: true,
+	EnableCTSnapshot:  true,
+	ConntrackCacheTTL: 30 * time.Second,
 }
 
 type Config struct {
-	EnableCTSnapshot bool `mapstructure:"hubble-enable-ct-snapshot"`
+	EnableCTSnapshot  bool          `mapstructure:"hubble-enable-ct-snapshot"`
+	ConntrackCacheTTL time.Duration `mapstructure:"hubble-conntrack-cache-ttl"`
 }
 
 func (def Config) Flags(flags *pflag.FlagSet) {
 	flags.Bool("hubble-enable-ct-snapshot", def.EnableCTSnapshot, "Enable the GetConntrackSnapshot API, which exports a snapshot of the node's datapath conntrack maps to Hubble.")
+	flags.Duration("hubble-conntrack-cache-ttl", def.ConntrackCacheTTL, "Duration for which the conntrack snapshot is cached.")
 }
