@@ -57,6 +57,7 @@ by the 4-tuple consisting of source IP, destination IP, destination port, and pr
 | count | [uint64](#uint64) |  |  |
 | source | [flow.Endpoint](#flow-Endpoint) |  | source/destination are resolved from Cilium&#39;s identity/endpoint state at read time. Unset if the resolution failed. |
 | destination | [flow.Endpoint](#flow-Endpoint) |  |  |
+| service | [flow.Service](#flow-Service) |  | service is resolved from rev_nat_index or rev_nat_ip/port. Unset if the corresponding ID is 0 or could not be resolved. |
 
 
 

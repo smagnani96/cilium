@@ -5,15 +5,18 @@ package conntrack
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"log/slog"
 	"net/netip"
 	"sync/atomic"
 	"time"
 
-	"github.com/cilium/cilium/pkg/hubble/observer/conntrack/types"
+	"github.com/cilium/cilium/pkg/byteorder"
+	ctTypes "github.com/cilium/cilium/pkg/hubble/observer/conntrack/types"
 	resolverTypes "github.com/cilium/cilium/pkg/hubble/resolver/types"
 	"github.com/cilium/cilium/pkg/maps/ctmap"
+	"github.com/cilium/cilium/pkg/types"
 	"github.com/cilium/cilium/pkg/u8proto"
 	"golang.org/x/sync/singleflight"
 
@@ -24,12 +27,13 @@ var ErrExporterDisabled = fmt.Errorf("conntrack exporter is disabled")
 
 // ctExporter is responsible for exporting conntrack entries from the datapath.
 type ctExporter struct {
-	cfg      Config
-	ctMaps   ctmap.CTMaps
-	logger   *slog.Logger
-	epGetter resolverTypes.EndpointGetter
+	cfg       Config
+	ctMaps    ctmap.CTMaps
+	logger    *slog.Logger
+	epGetter  resolverTypes.EndpointGetter
+	svcGetter resolverTypes.ServiceGetter
 
-	snapshot atomic.Pointer[Snapshot]
+	snapshot atomic.Pointer[ctTypes.Snapshot]
 	refresh  singleflight.Group
 }
 
@@ -43,24 +47,31 @@ type ctAggregationKey struct {
 	protocol        u8proto.U8proto
 }
 
+// isIPv6 checks if both the source and destination IP addresses are IPv6.
+func (c ctAggregationKey) isIPv6() bool {
+	return c.sourceIP.Is6() && c.destinationIP.Is6()
+}
+
 // newConntrackExporter creates a new ConntrackExporter with the given parameters.
 func newConntrackExporter(
 	cfg Config,
 	ctMaps ctmap.CTMaps,
 	log *slog.Logger,
 	epGetter resolverTypes.EndpointGetter,
+	svcGetter resolverTypes.ServiceGetter,
 ) *ctExporter {
 	return &ctExporter{
-		cfg:      cfg,
-		ctMaps:   ctMaps,
-		logger:   log,
-		epGetter: epGetter,
+		cfg:       cfg,
+		ctMaps:    ctMaps,
+		logger:    log,
+		epGetter:  epGetter,
+		svcGetter: svcGetter,
 	}
 }
 
 // GetConntrackSnapshot dumps a snapshot of the node's datapath conntrack maps.
 // It returns an error if the exporter is disabled.
-func (c *ctExporter) GetConntrackSnapshot(ctx context.Context) (*types.Snapshot, error) {
+func (c *ctExporter) GetConntrackSnapshot(ctx context.Context) (*ctTypes.Snapshot, error) {
 	if c == nil || !c.cfg.EnableCTSnapshot {
 		return nil, ErrExporterDisabled
 	}
@@ -87,11 +98,11 @@ func (c *ctExporter) GetConntrackSnapshot(ctx context.Context) (*types.Snapshot,
 	if err != nil {
 		return nil, err
 	}
-	return v.(*Snapshot), nil
+	return v.(*ctTypes.Snapshot), nil
 }
 
 // cachedSnapshot returns the cached snapshot if it is still valid.
-func (c *ctExporter) cachedSnapshot() *Snapshot {
+func (c *ctExporter) cachedSnapshot() *ctTypes.Snapshot {
 	snap := c.snapshot.Load()
 	if snap != nil && time.Since(snap.ComputedAt) < c.cfg.ConntrackCacheTTL {
 		return snap
@@ -100,12 +111,12 @@ func (c *ctExporter) cachedSnapshot() *Snapshot {
 }
 
 // dumpSnapshot walks the datapath conntrack maps and creates a new snapshot.
-func (c *ctExporter) dumpSnapshot(ctx context.Context) (*types.Snapshot, error) {
+func (c *ctExporter) dumpSnapshot(ctx context.Context) (*ctTypes.Snapshot, error) {
 	entries := make(map[ctAggregationKey]*observerpb.ConntrackEntry)
 
 	for _, m := range c.ctMaps.ActiveMaps() {
 		err := m.DumpEntries(ctx, func(key ctmap.CtKey, val *ctmap.CtEntry) bool {
-			aggregateCtEntry(entries, key, val, c.epGetter)
+			aggregateCtEntry(entries, key, val, c.epGetter, c.svcGetter)
 			return true
 		})
 		if err != nil {
@@ -113,7 +124,7 @@ func (c *ctExporter) dumpSnapshot(ctx context.Context) (*types.Snapshot, error) 
 		}
 	}
 
-	snap := &types.Snapshot{
+	snap := &ctTypes.Snapshot{
 		Entries:    make([]*observerpb.ConntrackEntry, 0, len(entries)),
 		ComputedAt: time.Now(),
 	}
@@ -169,6 +180,7 @@ func aggregateCtEntry(
 	key ctmap.CtKey,
 	val *ctmap.CtEntry,
 	epGetter resolverTypes.EndpointGetter,
+	svcGetter resolverTypes.ServiceGetter,
 ) {
 	aggregateKey, ok := aggregateCtKey(key)
 	if !ok {
@@ -194,4 +206,27 @@ func aggregateCtEntry(
 	e.Packets += val.Packets
 	e.Bytes += val.Bytes
 	e.Count += 1
+
+	if svcGetter != nil && e.Service == nil {
+		if val.RevNAT != 0 {
+			e.Service = svcGetter.GetServiceByRevNatIndex(uint32(byteorder.NetworkToHost16(val.RevNAT)))
+		} else if val.NatPort != 0 {
+			e.Service = svcGetter.GetServiceByAddr(natAddrFromUnion0(val.Union0, aggregateKey.isIPv6()), byteorder.NetworkToHost16(val.NatPort))
+		}
+	}
+}
+
+// natAddrFromUnion0 extracts the IP address from the Union0 field of a
+// conntrack entry.
+func natAddrFromUnion0(union0 [2]uint64, isIPv6 bool) netip.Addr {
+	var raw [16]byte
+	binary.LittleEndian.PutUint64(raw[0:8], union0[0])
+	binary.LittleEndian.PutUint64(raw[8:16], union0[1])
+
+	if isIPv6 {
+		return types.IPv6(raw).Addr()
+	}
+	var v4 types.IPv4
+	copy(v4[:], raw[12:16])
+	return v4.Addr()
 }

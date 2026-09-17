@@ -123,13 +123,17 @@ func runListConntrack(ctx context.Context, cmd *cobra.Command, conn *grpc.Client
 
 func conntrackTableOutput(buf io.Writer, nodes []*nodeConntrack) error {
 	tw := tabwriter.NewWriter(buf, 2, 0, 3, ' ', 0)
-	fmt.Fprint(tw, "SOURCE\tDESTINATION\tPROTO\tPACKETS\tBYTES\tCONNECTIONS")
+	fmt.Fprint(tw, "SOURCE\tDESTINATION\tPROTO\tPACKETS\tBYTES\tCONNECTIONS\tSERVICE")
 	fmt.Fprintln(tw)
 
 	for _, n := range nodes {
 		fmt.Fprintf(buf, "Conntrack Snapshot from %s refreshed at %s", n.NodeName, n.ComputedAt.Local())
 		fmt.Fprintln(buf)
 		for _, v := range sortedEntries(n.Entries) {
+			var svc string
+			if v.GetService() != nil {
+				svc = fmt.Sprintf("%s/%s", v.GetService().GetNamespace(), v.GetService().GetName())
+			}
 			fmt.Fprint(tw,
 				fmt.Sprintf("%s %s", v.GetSourceIp(), conntrackEndpointLabel(v.GetSource())), "\t",
 				fmt.Sprintf("%s:%d %s", v.GetDestinationIp(), v.GetDestinationPort(), conntrackEndpointLabel(v.GetDestination())), "\t",
@@ -137,6 +141,7 @@ func conntrackTableOutput(buf io.Writer, nodes []*nodeConntrack) error {
 				v.GetPackets(), "\t",
 				v.GetBytes(), "\t",
 				v.GetCount(), "\t",
+				svc,
 			)
 			fmt.Fprintln(tw)
 		}

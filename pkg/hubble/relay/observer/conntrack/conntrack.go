@@ -148,4 +148,7 @@ func aggregateCtEntry(
 	if e.GetDestination() == nil && val.GetDestination() != nil {
 		e.Destination = val.GetDestination()
 	}
+	if e.GetService() == nil && val.GetService() != nil {
+		e.Service = val.GetService()
+	}
 }

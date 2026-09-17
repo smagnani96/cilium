@@ -60,6 +60,7 @@ type IPGetter interface {
 // ServiceGetter fetches service metadata.
 type ServiceGetter interface {
 	GetServiceByAddr(ip netip.Addr, port uint16) *flowpb.Service
+	GetServiceByRevNatIndex(revNatIndex uint32) *flowpb.Service
 }
 
 // LinkGetter fetches local link information.

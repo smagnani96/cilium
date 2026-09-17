@@ -4,6 +4,7 @@
 package conntrack
 
 import (
+	"encoding/binary"
 	"net/netip"
 	"sync/atomic"
 	"testing"
@@ -33,7 +34,7 @@ func (m *mockCTMaps) ActiveMaps() []*ctmap.Map {
 }
 
 func TestConntrackExporter_Disabled(t *testing.T) {
-	c := newConntrackExporter(Config{EnableCTSnapshot: false}, &mockCTMaps{}, hivetest.Logger(t), nil)
+	c := newConntrackExporter(Config{EnableCTSnapshot: false}, &mockCTMaps{}, hivetest.Logger(t), nil, nil)
 	snap, err := c.GetConntrackSnapshot(t.Context())
 	require.ErrorIs(t, err, ErrExporterDisabled)
 	require.Nil(t, snap)
@@ -41,7 +42,7 @@ func TestConntrackExporter_Disabled(t *testing.T) {
 
 func TestConntrackExporter_Cache(t *testing.T) {
 	ctMaps := &mockCTMaps{}
-	c := newConntrackExporter(Config{EnableCTSnapshot: true, ConntrackCacheTTL: 10 * time.Second}, ctMaps, hivetest.Logger(t), nil)
+	c := newConntrackExporter(Config{EnableCTSnapshot: true, ConntrackCacheTTL: 10 * time.Second}, ctMaps, hivetest.Logger(t), nil, nil)
 
 	snap1, err := c.GetConntrackSnapshot(t.Context())
 	require.NoError(t, err)
@@ -72,6 +73,11 @@ func TestAggregateCtEntry(t *testing.T) {
 		"fd00::1":  "pod-src-v6",
 		"fd00::2":  "pod-dst-v6-b",
 		"fd01::2":  "pod-dst-v6-c",
+		"10.0.0.3": "pod-src-revnat",
+		"10.0.0.4": "pod-dst-revnat",
+		"10.0.0.5": "pod-backend",
+		"10.0.0.7": "pod-src-natport",
+		"10.0.0.6": "pod-dst-natport",
 	}
 	epGetter := &testutils.FakeEndpointGetter{
 		OnResolveEndpoint: func(ip netip.Addr, _ uint32, _ resolverTypes.DatapathContext) *flowpb.Endpoint {
@@ -80,6 +86,28 @@ func TestAggregateCtEntry(t *testing.T) {
 				return nil
 			}
 			return &flowpb.Endpoint{PodName: podName}
+		},
+	}
+
+	const (
+		revNatIndex   = 7
+		backendID     = 42
+		backendAddr   = "10.0.0.5"
+		natPort       = 5353
+		natAddrString = "10.0.0.8"
+	)
+	svcGetter := &testutils.FakeServiceGetter{
+		OnGetServiceByAddr: func(ip netip.Addr, port uint16) *flowpb.Service {
+			if ip.String() == natAddrString && port == natPort {
+				return &flowpb.Service{Name: "svc-natport"}
+			}
+			return nil
+		},
+		OnGetServiceByRevNatIndex: func(revNatIdx uint32) *flowpb.Service {
+			if revNatIdx == revNatIndex {
+				return &flowpb.Service{Name: "svc-revnat"}
+			}
+			return nil
 		},
 	}
 
@@ -92,6 +120,8 @@ func TestAggregateCtEntry(t *testing.T) {
 			// swap the ports: SourceAddr:DestPort is the real client
 			// (10.0.0.2:1234), DestAddr:SourcePort is the service frontend
 			// (10.0.0.1:80).
+			// Service entry resolved via rev_nat_index, with its backend
+			// resolved via backend_id (Union0[1]).
 			record: ctmap.CtMapRecord{
 				Key: &ctmap.CtKey4Global{
 					TupleKey4Global: tuple.TupleKey4Global{
@@ -108,6 +138,8 @@ func TestAggregateCtEntry(t *testing.T) {
 				Value: ctmap.CtEntry{
 					Packets: 10,
 					Bytes:   2000,
+					RevNAT:  byteorder.HostToNetwork16(revNatIndex),
+					Union0:  [2]uint64{0, backendID},
 				},
 			},
 			assertEntry: &observerpb.ConntrackEntry{
@@ -120,6 +152,7 @@ func TestAggregateCtEntry(t *testing.T) {
 				Count:           1,
 				Source:          &flowpb.Endpoint{PodName: "pod-src-v4"},
 				Destination:     &flowpb.Endpoint{PodName: "pod-dst-v4"},
+				Service:         &flowpb.Service{Name: "svc-revnat"},
 			},
 		},
 		{
@@ -155,6 +188,42 @@ func TestAggregateCtEntry(t *testing.T) {
 				Count:           2,
 				Source:          &flowpb.Endpoint{PodName: "pod-src-v4"},
 				Destination:     &flowpb.Endpoint{PodName: "pod-dst-v4"},
+				Service:         &flowpb.Service{Name: "svc-revnat"},
+			},
+		},
+		{
+			// Service entry resolved via the NAT'd address/port
+			// (Union0/nat_port), independently of rev_nat_index.
+			record: ctmap.CtMapRecord{
+				Key: &ctmap.CtKey4Global{
+					TupleKey4Global: tuple.TupleKey4Global{
+						TupleKey4: tuple.TupleKey4{
+							SourceAddr: types.IPv4{10, 0, 0, 6},
+							DestAddr:   types.IPv4{10, 0, 0, 7},
+							SourcePort: byteorder.HostToNetwork16(3333),
+							DestPort:   byteorder.HostToNetwork16(53),
+							NextHeader: u8proto.UDP,
+						},
+					},
+				},
+				Value: ctmap.CtEntry{
+					Packets: 2,
+					Bytes:   200,
+					NatPort: byteorder.HostToNetwork16(natPort),
+					Union0:  ipv4NatUnion0(10, 0, 0, 8),
+				},
+			},
+			assertEntry: &observerpb.ConntrackEntry{
+				SourceIp:        "10.0.0.7",
+				DestinationIp:   "10.0.0.6",
+				DestinationPort: 53,
+				Protocol:        uint32(u8proto.UDP),
+				Packets:         2,
+				Bytes:           200,
+				Count:           1,
+				Source:          &flowpb.Endpoint{PodName: "pod-src-natport"},
+				Destination:     &flowpb.Endpoint{PodName: "pod-dst-natport"},
+				Service:         &flowpb.Service{Name: "svc-natport"},
 			},
 		},
 		{
@@ -227,9 +296,20 @@ func TestAggregateCtEntry(t *testing.T) {
 		key, ok := aggregateCtKey(s.record.Key)
 		require.True(t, ok, "failed to aggregate key")
 
-		aggregateCtEntry(entries, s.record.Key, &s.record.Value, epGetter)
+		aggregateCtEntry(entries, s.record.Key, &s.record.Value, epGetter, svcGetter)
 		e, ok := entries[key]
 		require.True(t, ok, "expected aggregation key not found")
 		require.Equal(t, s.assertEntry.String(), e.String())
+	}
+}
+
+// ipv4NatUnion0 encodes an IPv4 address the same way the datapath packs it
+// into ctmap.CtEntry.Union0, inverting natAddrFromUnion0.
+func ipv4NatUnion0(a, b, c, d byte) [2]uint64 {
+	var raw [16]byte
+	copy(raw[12:16], []byte{a, b, c, d})
+	return [2]uint64{
+		binary.LittleEndian.Uint64(raw[0:8]),
+		binary.LittleEndian.Uint64(raw[8:16]),
 	}
 }

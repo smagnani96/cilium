@@ -324,6 +324,9 @@ message ConntrackEntry {
     // state at read time. Unset if the resolution failed.
     flow.Endpoint source = 8;
     flow.Endpoint destination = 9;
+    // service is resolved from rev_nat_index or rev_nat_ip/port.
+    // Unset if the corresponding ID is 0 or could not be resolved.
+    flow.Service service = 10;
 }
 
 // ExportEvent contains an event to be exported. Not to be used outside of the

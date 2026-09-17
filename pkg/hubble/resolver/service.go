@@ -46,3 +46,15 @@ func (g *ServiceGetter) GetServiceByAddr(ip netip.Addr, port uint16) *flowpb.Ser
 		Name:      fe.ServiceName.Name(),
 	}
 }
+
+func (g *ServiceGetter) GetServiceByRevNatIndex(revNatIndex uint32) *flowpb.Service {
+	txn := g.db.ReadTxn()
+	fe, found := loadbalancer.LookupFrontendByID(txn, g.frontends, loadbalancer.ServiceID(revNatIndex))
+	if !found {
+		return nil
+	}
+	return &flowpb.Service{
+		Namespace: fe.ServiceName.Namespace(),
+		Name:      fe.ServiceName.Name(),
+	}
+}
