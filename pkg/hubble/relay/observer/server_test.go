@@ -10,6 +10,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"slices"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -1513,7 +1514,6 @@ func TestServerStatus(t *testing.T) {
 		})
 	}
 }
-
 func TestGetConntrackSnapshot_PeerError(t *testing.T) {
 	peers := []poolTypes.Peer{
 		{
@@ -1539,18 +1539,23 @@ func TestGetConntrackSnapshot_PeerError(t *testing.T) {
 					if p.Name == "bad" {
 						return nil, fmt.Errorf("bad")
 					}
-					var sent bool
+					msgs := []*observerpb.GetConntrackSnapshotResponse{
+						{ResponseTypes: &observerpb.GetConntrackSnapshotResponse_Header{
+							Header: &observerpb.GetConntrackSnapshotHeader{NodeName: p.Name},
+						}},
+						{ResponseTypes: &observerpb.GetConntrackSnapshotResponse_Entry{
+							Entry: &observerpb.ConntrackEntry{SourceIp: "10.0.0.ok", DestinationIp: "10.0.0.254", DestinationPort: 80, Protocol: 6, Packets: 1},
+						}},
+					}
+					i := 0
 					return &testutils.FakeGetConntrackSnapshotClient{
 						OnRecv: func() (*observerpb.GetConntrackSnapshotResponse, error) {
-							if sent {
+							if i >= len(msgs) {
 								return nil, io.EOF
 							}
-							sent = true
-							return &observerpb.GetConntrackSnapshotResponse{
-								ResponseTypes: &observerpb.GetConntrackSnapshotResponse_Header{
-									Header: &observerpb.GetConntrackSnapshotHeader{NodeName: p.Name},
-								},
-							}, nil
+							m := msgs[i]
+							i++
+							return m, nil
 						},
 					}, nil
 				},
@@ -1575,27 +1580,39 @@ func TestGetConntrackSnapshot_PeerError(t *testing.T) {
 		},
 	}
 
+	// The "ok" peer answers normally while the "bad" peer fails to dial. The
+	// merged snapshot must still carry the "ok" peer's entries, and the
+	// "bad" peer's failure must surface as its own node_status response
+	// rather than being silently dropped.
 	err = srv.GetConntrackSnapshot(&observerpb.GetConntrackSnapshotRequest{}, stream)
 	require.NoError(t, err)
 
-	var entries []*observerpb.GetConntrackSnapshotResponse
+	var headers []*observerpb.GetConntrackSnapshotHeader
+	var entries []*observerpb.ConntrackEntry
 	var statuses []*relaypb.NodeStatusEvent
 	for _, resp := range got {
+		if h := resp.GetHeader(); h != nil {
+			headers = append(headers, h)
+			continue
+		}
 		if ns := resp.GetNodeStatus(); ns != nil {
 			statuses = append(statuses, ns)
 			continue
 		}
-		entries = append(entries, resp)
+		entries = append(entries, resp.GetEntry())
 	}
 
+	// The merged snapshot is streamed under a single relay-wide header,
+	// regardless of how many peers contributed entries.
+	require.Len(t, headers, 1)
+	assert.Equal(t, "hubble-relay", headers[0].GetNodeName())
+
 	if diff := cmp.Diff(
-		[]*observerpb.GetConntrackSnapshotResponse{{
-			ResponseTypes: &observerpb.GetConntrackSnapshotResponse_Header{
-				Header: &observerpb.GetConntrackSnapshotHeader{NodeName: "ok"},
-			},
-		}},
+		[]*observerpb.ConntrackEntry{
+			{SourceIp: "10.0.0.ok", DestinationIp: "10.0.0.254", DestinationPort: 80, Protocol: 6, Packets: 1},
+		},
 		entries,
-		cmpopts.IgnoreUnexported(observerpb.GetConntrackSnapshotResponse{}, observerpb.GetConntrackSnapshotHeader{}),
+		cmpopts.IgnoreUnexported(observerpb.ConntrackEntry{}),
 	); diff != "" {
 		t.Errorf("entries mismatch (-want +got):\n%s", diff)
 	}
@@ -1640,30 +1657,33 @@ func TestGetConntrackSnapshot(t *testing.T) {
 		}
 	}
 	type want struct {
-		groups [][]*observerpb.GetConntrackSnapshotResponse
-		err    error
+		entries  []*observerpb.ConntrackEntry
+		badNodes []string
+		err      error
 	}
-	// onClientFor returns an observerClientBuilder whose GetConntrackSnapshot
+	// newClientBuilder returns an observerClientBuilder whose GetConntrackSnapshot
 	// answers with a header followed by a single entry, both tagged with the
-	// peer's own name, and panics if invoked for a peer name in skip.
-	onClientFor := func(skip ...string) observerClientBuilder {
+	// peer's own name. It panics if invoked for a peer name in skip, and fails
+	// to dial for a peer name in bad.
+	newClientBuilder := func(skip, bad []string) observerClientBuilder {
 		return fakeObserverClientBuilder{
 			onObserverClient: func(p *poolTypes.Peer) observerpb.ObserverClient {
-				for _, name := range skip {
-					if p.Name == name {
-						panic("peer " + name + " should have been filtered out before being dialed")
-					}
+				if slices.Contains(skip, p.Name) {
+					panic("peer " + p.Name + " should have been filtered out before being dialed")
 				}
 				msgs := []*observerpb.GetConntrackSnapshotResponse{
 					{ResponseTypes: &observerpb.GetConntrackSnapshotResponse_Header{
 						Header: &observerpb.GetConntrackSnapshotHeader{NodeName: p.Name},
 					}},
 					{ResponseTypes: &observerpb.GetConntrackSnapshotResponse_Entry{
-						Entry: &observerpb.ConntrackEntry{SourceIp: p.Name},
+						Entry: &observerpb.ConntrackEntry{SourceIp: "10.0.0." + p.Name, DestinationIp: "10.0.0.254", DestinationPort: 80, Protocol: 6, Packets: 1},
 					}},
 				}
 				return &testutils.FakeObserverClient{
 					OnGetConntrackSnapshot: func(_ context.Context, _ *observerpb.GetConntrackSnapshotRequest, _ ...grpc.CallOption) (observerpb.Observer_GetConntrackSnapshotClient, error) {
+						if slices.Contains(bad, p.Name) {
+							return nil, fmt.Errorf("dial failed for %s", p.Name)
+						}
 						i := 0
 						return &testutils.FakeGetConntrackSnapshotClient{
 							OnRecv: func() (*observerpb.GetConntrackSnapshotResponse, error) {
@@ -1690,27 +1710,25 @@ func TestGetConntrackSnapshot(t *testing.T) {
 		{
 			name: "no node filter dumps every peer",
 			plr:  &testutils.FakePeerLister{OnList: peers},
-			ocb:  onClientFor(),
+			ocb:  newClientBuilder(nil, nil),
 			req:  &observerpb.GetConntrackSnapshotRequest{},
 			want: want{
-				groups: [][]*observerpb.GetConntrackSnapshotResponse{
-					{
-						{ResponseTypes: &observerpb.GetConntrackSnapshotResponse_Header{
-							Header: &observerpb.GetConntrackSnapshotHeader{NodeName: "one"},
-						}},
-						{ResponseTypes: &observerpb.GetConntrackSnapshotResponse_Entry{
-							Entry: &observerpb.ConntrackEntry{SourceIp: "one"},
-						}},
-					},
-					{
-						{ResponseTypes: &observerpb.GetConntrackSnapshotResponse_Header{
-							Header: &observerpb.GetConntrackSnapshotHeader{NodeName: "two"},
-						}},
-						{ResponseTypes: &observerpb.GetConntrackSnapshotResponse_Entry{
-							Entry: &observerpb.ConntrackEntry{SourceIp: "two"},
-						}},
-					},
+				entries: []*observerpb.ConntrackEntry{
+					{SourceIp: "10.0.0.one", DestinationIp: "10.0.0.254", DestinationPort: 80, Protocol: 6, Packets: 1},
+					{SourceIp: "10.0.0.two", DestinationIp: "10.0.0.254", DestinationPort: 80, Protocol: 6, Packets: 1},
 				},
+			},
+		},
+		{
+			name: "no node filter merges the good peers' snapshot with the bad peers' node status",
+			plr:  &testutils.FakePeerLister{OnList: peers},
+			ocb:  newClientBuilder(nil, []string{"two"}),
+			req:  &observerpb.GetConntrackSnapshotRequest{},
+			want: want{
+				entries: []*observerpb.ConntrackEntry{
+					{SourceIp: "10.0.0.one", DestinationIp: "10.0.0.254", DestinationPort: 80, Protocol: 6, Packets: 1},
+				},
+				badNodes: []string{"two"},
 			},
 		},
 	}
@@ -1737,21 +1755,35 @@ func TestGetConntrackSnapshot(t *testing.T) {
 			err = srv.GetConntrackSnapshot(tt.req, stream)
 			assert.Equal(t, tt.want.err, err)
 
-			// Regroup the flat stream by header boundary: a peer's header
-			// must never end up separated from its own entries by another
-			// peer's messages.
-			var groups [][]*observerpb.GetConntrackSnapshotResponse
+			var headers []*observerpb.GetConntrackSnapshotHeader
+			var entries []*observerpb.ConntrackEntry
+			var badNodes []string
 			for _, resp := range got {
-				if resp.GetHeader() != nil {
-					groups = append(groups, nil)
+				if h := resp.GetHeader(); h != nil {
+					headers = append(headers, h)
+					continue
 				}
-				groups[len(groups)-1] = append(groups[len(groups)-1], resp)
+				if ns := resp.GetNodeStatus(); ns != nil {
+					assert.Equal(t, relaypb.NodeState_NODE_ERROR, ns.GetStateChange())
+					badNodes = append(badNodes, ns.GetNodeNames()...)
+					continue
+				}
+				entries = append(entries, resp.GetEntry())
 			}
 
-			if diff := cmp.Diff(tt.want.groups, groups, cmpopts.SortSlices(func(a, b []*observerpb.GetConntrackSnapshotResponse) bool {
-				return a[0].GetHeader().GetNodeName() < b[0].GetHeader().GetNodeName()
-			}), cmpopts.IgnoreUnexported(observerpb.GetConntrackSnapshotResponse{}, observerpb.GetConntrackSnapshotHeader{}, observerpb.ConntrackEntry{})); diff != "" {
-				t.Errorf("groups mismatch (-want +got):\n%s", diff)
+			// The merged snapshot is streamed under a single relay-wide
+			// header, regardless of how many peers contributed entries.
+			require.Len(t, headers, 1)
+			assert.Equal(t, "hubble-relay", headers[0].GetNodeName())
+
+			if diff := cmp.Diff(tt.want.entries, entries, cmpopts.SortSlices(func(a, b *observerpb.ConntrackEntry) bool {
+				return a.GetSourceIp() < b.GetSourceIp()
+			}), cmpopts.IgnoreUnexported(observerpb.ConntrackEntry{}), cmpopts.EquateEmpty()); diff != "" {
+				t.Errorf("entries mismatch (-want +got):\n%s", diff)
+			}
+
+			if diff := cmp.Diff(tt.want.badNodes, badNodes, cmpopts.SortSlices(func(a, b string) bool { return a < b }), cmpopts.EquateEmpty()); diff != "" {
+				t.Errorf("bad nodes mismatch (-want +got):\n%s", diff)
 			}
 		})
 	}

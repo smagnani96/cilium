@@ -121,7 +121,7 @@ func runListConntrack(ctx context.Context, cmd *cobra.Command, conn *grpc.Client
 
 func conntrackTableOutput(buf io.Writer, nodes []*nodeConntrack) error {
 	tw := tabwriter.NewWriter(buf, 2, 0, 3, ' ', 0)
-	fmt.Fprint(tw, "NODE\tSOURCE\tDESTINATION\tPROTO\tPACKETS\tBYTES\tCONNECTIONS")
+	fmt.Fprint(tw, "SOURCE\tDESTINATION\tPROTO\tPACKETS\tBYTES\tCONNECTIONS")
 	fmt.Fprintln(tw)
 
 	for _, n := range nodes {
@@ -129,7 +129,6 @@ func conntrackTableOutput(buf io.Writer, nodes []*nodeConntrack) error {
 		fmt.Fprintln(buf)
 		for _, v := range sortedEntries(n.Entries) {
 			fmt.Fprint(tw,
-				n.NodeName, "\t",
 				v.GetSourceIp(), "\t",
 				fmt.Sprintf("%s:%d", v.GetDestinationIp(), v.GetDestinationPort()), "\t",
 				conntrackProtocolName(v.GetProtocol()), "\t",

@@ -13,12 +13,14 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	grpcStatus "google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/timestamppb"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 
 	observerpb "github.com/cilium/cilium/api/v1/observer"
 	relaypb "github.com/cilium/cilium/api/v1/relay"
 	"github.com/cilium/cilium/pkg/hubble/build"
 	"github.com/cilium/cilium/pkg/hubble/observer/namespace"
+	"github.com/cilium/cilium/pkg/hubble/relay/observer/conntrack"
 	poolTypes "github.com/cilium/cilium/pkg/hubble/relay/pool/types"
 	"github.com/cilium/cilium/pkg/lock"
 	"github.com/cilium/cilium/pkg/logging/logfields"
@@ -43,6 +45,8 @@ type PeerLister interface {
 type Server struct {
 	opts  options
 	peers PeerLister
+
+	ctExporter conntrack.CTExporter
 }
 
 // NewServer creates a new Server.
@@ -53,10 +57,12 @@ func NewServer(peers PeerLister, options ...Option) (*Server, error) {
 			return nil, fmt.Errorf("failed to apply option: %w", err)
 		}
 	}
-	return &Server{
+	s := &Server{
 		opts:  opts,
 		peers: peers,
-	}, nil
+	}
+	s.ctExporter = conntrack.NewCTExporter(s.fetchConntrackSnapshots)
+	return s, nil
 }
 
 // GetFlows implements observerpb.ObserverServer.GetFlows by proxying requests to
@@ -245,9 +251,46 @@ func (s *Server) GetNamespaces(ctx context.Context, req *observerpb.GetNamespace
 }
 
 // GetConntrackSnapshot implements observerpb.ObserverServer.GetConntrackSnapshot
-// by fanning out to every hubble peer and forwarding their per-node conntrack entries.
+// by fanning out to every hubble peer and merging their own conntrack snapshots
+// into a single, cluster-wide snapshot.
 func (s *Server) GetConntrackSnapshot(req *observerpb.GetConntrackSnapshotRequest, stream observerpb.Observer_GetConntrackSnapshotServer) error {
-	ctx := stream.Context()
+	snap, err := s.ctExporter.GetConntrackSnapshot(stream.Context())
+	if err != nil {
+		return err
+	}
+
+	if len(snap.Entries) > 0 {
+		if err := stream.Send(&observerpb.GetConntrackSnapshotResponse{
+			ResponseTypes: &observerpb.GetConntrackSnapshotResponse_Header{
+				Header: &observerpb.GetConntrackSnapshotHeader{
+					NodeName:   "hubble-relay",
+					ComputedAt: timestamppb.New(snap.ComputedAt),
+				},
+			},
+		}); err != nil {
+			return err
+		}
+	}
+	for _, e := range snap.Entries {
+		if err := stream.Send(&observerpb.GetConntrackSnapshotResponse{
+			ResponseTypes: &observerpb.GetConntrackSnapshotResponse_Entry{Entry: e},
+		}); err != nil {
+			return err
+		}
+	}
+
+	for _, ns := range snap.NodeStatuses {
+		if err := stream.Send(ns); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// fetchConntrackSnapshots fans out a GetConntrackSnapshot call to every
+// reachable peer and collects each response (a per-node snapshot, or a
+// node_status event if the peer could not be dumped) into a single slice.
+func (s *Server) fetchConntrackSnapshots(ctx context.Context) ([]*observerpb.GetConntrackSnapshotResponse, error) {
 	if md, ok := metadata.FromIncomingContext(ctx); ok {
 		ctx = metadata.NewOutgoingContext(ctx, md)
 	}
@@ -256,7 +299,8 @@ func (s *Server) GetConntrackSnapshot(req *observerpb.GetConntrackSnapshotReques
 
 	g, gctx := errgroup.WithContext(ctx)
 	peers := s.peers.List()
-	groups := make(chan []*observerpb.GetConntrackSnapshotResponse, len(peers))
+	entries := make(chan *observerpb.GetConntrackSnapshotResponse, len(peers))
+	req := &observerpb.GetConntrackSnapshotRequest{}
 
 	for _, p := range peers {
 		if !isAvailable(p.Conn) {
@@ -278,16 +322,15 @@ func (s *Server) GetConntrackSnapshot(req *observerpb.GetConntrackSnapshotReques
 					logfields.Peer, p.Name,
 				)
 				select {
-				case groups <- []*observerpb.GetConntrackSnapshotResponse{conntrackNodeStatusError(err, p.Name)}:
+				case entries <- conntrackNodeStatusError(err, p.Name):
 				case <-gctx.Done():
 				}
 				return nil
 			}
-			var group []*observerpb.GetConntrackSnapshotResponse
 			for {
 				resp, err := peerStream.Recv()
 				if errors.Is(err, io.EOF) {
-					break
+					return nil
 				}
 				if err != nil {
 					s.opts.log.Warn(
@@ -295,36 +338,32 @@ func (s *Server) GetConntrackSnapshot(req *observerpb.GetConntrackSnapshotReques
 						logfields.Error, err,
 						logfields.Peer, p.Name,
 					)
-					group = append(group, conntrackNodeStatusError(err, p.Name))
-					break
+					select {
+					case entries <- conntrackNodeStatusError(err, p.Name):
+					case <-gctx.Done():
+					}
+					return nil
 				}
-				group = append(group, resp)
+				select {
+				case entries <- resp:
+				case <-gctx.Done():
+					return gctx.Err()
+				}
 			}
-			select {
-			case groups <- group:
-			case <-gctx.Done():
-				return gctx.Err()
-			}
-			return nil
 		})
 	}
 
-	var gErr error
 	go func() {
-		gErr = g.Wait()
-		close(groups)
+		g.Wait()
+		close(entries)
 	}()
 
-	for group := range groups {
-		for _, resp := range group {
-			if err := stream.Send(resp); err != nil {
-				cancel()
-				return err
-			}
-		}
+	var responses []*observerpb.GetConntrackSnapshotResponse
+	for resp := range entries {
+		responses = append(responses, resp)
 	}
 
-	return gErr
+	return responses, g.Wait()
 }
 
 // conntrackNodeStatusError wraps err into a GetConntrackSnapshotResponse
