@@ -5,6 +5,9 @@ package conntrack
 
 import (
 	"context"
+	"sync/atomic"
+
+	"golang.org/x/sync/singleflight"
 
 	observerpb "github.com/cilium/cilium/api/v1/observer"
 	"github.com/cilium/cilium/pkg/time"
@@ -14,6 +17,10 @@ import (
 // multiple nodes.
 type ctExporter struct {
 	fetch func(ctx context.Context) ([]*observerpb.GetConntrackSnapshotResponse, error)
+
+	cached   atomic.Pointer[Snapshot]
+	refresh  singleflight.Group
+	cacheTTL time.Duration
 }
 
 // ctAggregationKey identifies a connection across every node's own
@@ -26,23 +33,52 @@ type ctAggregationKey struct {
 }
 
 // newCTExporter creates a new ctExporter instance using the provided fetch function.
-func newCTExporter(fetch func(ctx context.Context) ([]*observerpb.GetConntrackSnapshotResponse, error)) *ctExporter {
-	return &ctExporter{fetch: fetch}
+func newCTExporter(cacheTTL time.Duration, fetch func(ctx context.Context) ([]*observerpb.GetConntrackSnapshotResponse, error)) *ctExporter {
+	return &ctExporter{fetch: fetch, cacheTTL: cacheTTL}
 }
 
 // GetConntrackSnapshot returns the conntrack snapshot from all the nodes.
 func (c *ctExporter) GetConntrackSnapshot(ctx context.Context) (*Snapshot, error) {
-	responses, err := c.fetch(ctx)
+	if e := c.cachedSnapshot(); e != nil {
+		return e, nil
+	}
+
+	v, err, _ := c.refresh.Do("", func() (any, error) {
+		// Someone else may have refreshed it between our check above and
+		// winning the singleflight call.
+		if e := c.cachedSnapshot(); e != nil {
+			return e, nil
+		}
+
+		responses, err := c.fetch(ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		entries, nodeStatuses := mergeConntrackResponses(responses)
+		entry := &Snapshot{Entries: entries, NodeStatuses: nodeStatuses, ComputedAt: time.Now()}
+
+		// Don't cache a result where every peer failed.
+		allFailed := len(responses) > 0 && len(nodeStatuses) == len(responses)
+		if !allFailed {
+			c.cached.Store(entry)
+		}
+		return entry, nil
+	})
 	if err != nil {
 		return nil, err
 	}
+	e := v.(*Snapshot)
+	return e, nil
+}
 
-	entries, nodeStatuses := mergeConntrackResponses(responses)
-	return &Snapshot{
-		Entries:      entries,
-		ComputedAt:   time.Now(),
-		NodeStatuses: nodeStatuses,
-	}, nil
+// cachedSnapshot returns the cached snapshot if it is still valid.
+func (c *ctExporter) cachedSnapshot() *Snapshot {
+	e := c.cached.Load()
+	if e != nil && time.Since(e.ComputedAt) < c.cacheTTL {
+		return e
+	}
+	return nil
 }
 
 // mergeConntrackResponses merges every peer's GetConntrackSnapshot entries

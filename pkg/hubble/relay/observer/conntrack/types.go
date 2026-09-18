@@ -5,9 +5,9 @@ package conntrack
 
 import (
 	"context"
+	"time"
 
 	observerpb "github.com/cilium/cilium/api/v1/observer"
-	"github.com/cilium/cilium/pkg/time"
 )
 
 // Snapshot is the result of a single walk of the datapath conntrack maps.
@@ -22,7 +22,7 @@ type CTExporter interface {
 	GetConntrackSnapshot(ctx context.Context) (*Snapshot, error)
 }
 
-// NewCTExporter creates a new CTExporter instance using the provided fetch function.
-func NewCTExporter(fetch func(ctx context.Context) ([]*observerpb.GetConntrackSnapshotResponse, error)) CTExporter {
-	return newCTExporter(fetch)
+// NewCTExporter creates a new CTExporter instance using the provided fetch function and cache TTL.
+func NewCTExporter(cacheTTL time.Duration, fetch func(ctx context.Context) ([]*observerpb.GetConntrackSnapshotResponse, error)) CTExporter {
+	return newCTExporter(cacheTTL, fetch)
 }

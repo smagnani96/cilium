@@ -61,7 +61,7 @@ func NewServer(peers PeerLister, options ...Option) (*Server, error) {
 		opts:  opts,
 		peers: peers,
 	}
-	s.ctExporter = conntrack.NewCTExporter(s.fetchConntrackSnapshots)
+	s.ctExporter = conntrack.NewCTExporter(opts.conntrackCacheTTL, s.fetchConntrackSnapshots)
 	return s, nil
 }
 

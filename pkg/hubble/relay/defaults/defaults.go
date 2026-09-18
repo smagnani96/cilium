@@ -41,6 +41,9 @@ const (
 	// PeerUpdateInterval is the time interval in which relay is checking for
 	// newly joined peers for long running requests
 	PeerUpdateInterval = 2 * time.Second
+	// ConntrackCacheTTL is the duration for which the relay's merged,
+	// cluster-wide conntrack snapshot is cached.
+	ConntrackCacheTTL = 30 * time.Second
 
 	// GRPCMetadataRelayVersionKey is the grpc metadata key for the Hubble relay server version.
 	GRPCMetadataRelayVersionKey = "hubble-relay-version"

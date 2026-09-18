@@ -132,6 +132,15 @@ func WithErrorAggregationWindow(d time.Duration) Option {
 	}
 }
 
+// WithConntrackCacheTTL sets the duration for which the relay's merged,
+// cluster-wide conntrack snapshot is cached.
+func WithConntrackCacheTTL(d time.Duration) Option {
+	return func(o *options) error {
+		o.observerOptions = append(o.observerOptions, observer.WithConntrackCacheTTL(d))
+		return nil
+	}
+}
+
 // WithLogger set the logger used by hubble-relay.
 func WithLogger(log *slog.Logger) Option {
 	return func(o *options) error {
