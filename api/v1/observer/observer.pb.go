@@ -1760,9 +1760,14 @@ type ConntrackEntry struct {
 	Destination *flow.Endpoint `protobuf:"bytes,9,opt,name=destination,proto3" json:"destination,omitempty"`
 	// service is resolved from rev_nat_index or rev_nat_ip/port.
 	// Unset if the corresponding ID is 0 or could not be resolved.
-	Service       *flow.Service `protobuf:"bytes,10,opt,name=service,proto3" json:"service,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Service *flow.Service `protobuf:"bytes,10,opt,name=service,proto3" json:"service,omitempty"`
+	// source_node_name/destination_node_name are set when source_ip/
+	// destination_ip belong to a cluster node itself, rather than to an
+	// endpoint. Unset otherwise.
+	SourceNodeName      string `protobuf:"bytes,11,opt,name=source_node_name,json=sourceNodeName,proto3" json:"source_node_name,omitempty"`
+	DestinationNodeName string `protobuf:"bytes,12,opt,name=destination_node_name,json=destinationNodeName,proto3" json:"destination_node_name,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *ConntrackEntry) Reset() {
@@ -1863,6 +1868,20 @@ func (x *ConntrackEntry) GetService() *flow.Service {
 		return x.Service
 	}
 	return nil
+}
+
+func (x *ConntrackEntry) GetSourceNodeName() string {
+	if x != nil {
+		return x.SourceNodeName
+	}
+	return ""
+}
+
+func (x *ConntrackEntry) GetDestinationNodeName() string {
+	if x != nil {
+		return x.DestinationNodeName
+	}
+	return ""
 }
 
 // ExportEvent contains an event to be exported. Not to be used outside of the
@@ -2162,7 +2181,7 @@ const file_observer_observer_proto_rawDesc = "" +
 	"\x1aGetConntrackSnapshotHeader\x12\x1b\n" +
 	"\tnode_name\x18\x01 \x01(\tR\bnodeName\x12;\n" +
 	"\vcomputed_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
-	"computedAt\"\xe4\x02\n" +
+	"computedAt\"\xc2\x03\n" +
 	"\x0eConntrackEntry\x12\x1b\n" +
 	"\tsource_ip\x18\x01 \x01(\tR\bsourceIp\x12%\n" +
 	"\x0edestination_ip\x18\x02 \x01(\tR\rdestinationIp\x12)\n" +
@@ -2174,7 +2193,9 @@ const file_observer_observer_proto_rawDesc = "" +
 	"\x06source\x18\b \x01(\v2\x0e.flow.EndpointR\x06source\x120\n" +
 	"\vdestination\x18\t \x01(\v2\x0e.flow.EndpointR\vdestination\x12'\n" +
 	"\aservice\x18\n" +
-	" \x01(\v2\r.flow.ServiceR\aservice\"\xe9\x02\n" +
+	" \x01(\v2\r.flow.ServiceR\aservice\x12(\n" +
+	"\x10source_node_name\x18\v \x01(\tR\x0esourceNodeName\x122\n" +
+	"\x15destination_node_name\x18\f \x01(\tR\x13destinationNodeName\"\xe9\x02\n" +
 	"\vExportEvent\x12 \n" +
 	"\x04flow\x18\x01 \x01(\v2\n" +
 	".flow.FlowH\x00R\x04flow\x129\n" +

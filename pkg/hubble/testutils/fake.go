@@ -29,6 +29,7 @@ import (
 	"github.com/cilium/cilium/pkg/ipcache"
 	slim_corev1 "github.com/cilium/cilium/pkg/k8s/slim/k8s/api/core/v1"
 	"github.com/cilium/cilium/pkg/labels"
+	nodeTypes "github.com/cilium/cilium/pkg/node/types"
 	policyTypes "github.com/cilium/cilium/pkg/policy/types"
 )
 
@@ -467,6 +468,26 @@ var NoopServiceGetter = FakeServiceGetter{
 	},
 	OnGetServiceByRevNatIndex: func(revNatIndex uint32) *flowpb.Service {
 		return nil
+	},
+}
+
+// FakeNodeGetter is used for unit tests that need NodeGetter.
+type FakeNodeGetter struct {
+	OnGetNodeIdentityByIP func(ip netip.Addr) (nodeTypes.Identity, bool)
+}
+
+// GetNodeIdentityByIP implements FakeNodeGetter.GetNodeIdentityByIP.
+func (f *FakeNodeGetter) GetNodeIdentityByIP(ip netip.Addr) (nodeTypes.Identity, bool) {
+	if f.OnGetNodeIdentityByIP != nil {
+		return f.OnGetNodeIdentityByIP(ip)
+	}
+	panic("OnGetNodeIdentityByIP not set")
+}
+
+// NoopNodeGetter always returns an empty response.
+var NoopNodeGetter = FakeNodeGetter{
+	OnGetNodeIdentityByIP: func(ip netip.Addr) (nodeTypes.Identity, bool) {
+		return nodeTypes.Identity{}, false
 	},
 }
 

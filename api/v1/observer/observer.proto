@@ -327,6 +327,11 @@ message ConntrackEntry {
     // service is resolved from rev_nat_index or rev_nat_ip/port.
     // Unset if the corresponding ID is 0 or could not be resolved.
     flow.Service service = 10;
+    // source_node_name/destination_node_name are set when source_ip/
+    // destination_ip belong to a cluster node itself, rather than to an
+    // endpoint. Unset otherwise.
+    string source_node_name = 11;
+    string destination_node_name = 12;
 }
 
 // ExportEvent contains an event to be exported. Not to be used outside of the

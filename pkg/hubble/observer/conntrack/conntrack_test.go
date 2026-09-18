@@ -18,6 +18,7 @@ import (
 	resolverTypes "github.com/cilium/cilium/pkg/hubble/resolver/types"
 	"github.com/cilium/cilium/pkg/hubble/testutils"
 	"github.com/cilium/cilium/pkg/maps/ctmap"
+	nodeTypes "github.com/cilium/cilium/pkg/node/types"
 	"github.com/cilium/cilium/pkg/tuple"
 	"github.com/cilium/cilium/pkg/types"
 	"github.com/cilium/cilium/pkg/u8proto"
@@ -34,7 +35,7 @@ func (m *mockCTMaps) ActiveMaps() []*ctmap.Map {
 }
 
 func TestConntrackExporter_Disabled(t *testing.T) {
-	c := newConntrackExporter(Config{EnableCTSnapshot: false}, &mockCTMaps{}, hivetest.Logger(t), nil, nil)
+	c := newConntrackExporter(Config{EnableCTSnapshot: false}, &mockCTMaps{}, hivetest.Logger(t), nil, nil, nil)
 	snap, err := c.GetConntrackSnapshot(t.Context())
 	require.ErrorIs(t, err, ErrExporterDisabled)
 	require.Nil(t, snap)
@@ -42,7 +43,7 @@ func TestConntrackExporter_Disabled(t *testing.T) {
 
 func TestConntrackExporter_Cache(t *testing.T) {
 	ctMaps := &mockCTMaps{}
-	c := newConntrackExporter(Config{EnableCTSnapshot: true, ConntrackCacheTTL: 10 * time.Second}, ctMaps, hivetest.Logger(t), nil, nil)
+	c := newConntrackExporter(Config{EnableCTSnapshot: true, ConntrackCacheTTL: 10 * time.Second}, ctMaps, hivetest.Logger(t), nil, nil, nil)
 
 	snap1, err := c.GetConntrackSnapshot(t.Context())
 	require.NoError(t, err)
@@ -85,7 +86,29 @@ func TestAggregateCtEntry(t *testing.T) {
 			if !ok {
 				return nil
 			}
-			return &flowpb.Endpoint{PodName: podName}
+			// ID is set to mimic a genuine local endpoint (idpool.NoID == 0
+			// is never a real endpoint ID); this is what tells
+			// aggregateCtEntry not to also try resolving a node name.
+			return &flowpb.Endpoint{ID: 1, PodName: podName}
+		},
+	}
+
+	// Node names are looked up by IP for addresses that aren't already
+	// resolved to a known endpoint. "10.0.0.2" is deliberately also a key in
+	// podNames above, to assert that endpoint resolution takes precedence
+	// over node resolution rather than both firing.
+	nodeNames := map[string]string{
+		"10.0.0.2":  "node-x",
+		"10.0.0.9":  "node-a",
+		"10.0.0.10": "node-b",
+	}
+	nodeGetter := &testutils.FakeNodeGetter{
+		OnGetNodeIdentityByIP: func(ip netip.Addr) (nodeTypes.Identity, bool) {
+			name, ok := nodeNames[ip.String()]
+			if !ok {
+				return nodeTypes.Identity{}, false
+			}
+			return nodeTypes.Identity{Name: name}, true
 		},
 	}
 
@@ -150,8 +173,8 @@ func TestAggregateCtEntry(t *testing.T) {
 				Packets:         10,
 				Bytes:           2000,
 				Count:           1,
-				Source:          &flowpb.Endpoint{PodName: "pod-src-v4"},
-				Destination:     &flowpb.Endpoint{PodName: "pod-dst-v4"},
+				Source:          &flowpb.Endpoint{ID: 1, PodName: "pod-src-v4"},
+				Destination:     &flowpb.Endpoint{ID: 1, PodName: "pod-dst-v4"},
 				Service:         &flowpb.Service{Name: "svc-revnat"},
 			},
 		},
@@ -186,8 +209,8 @@ func TestAggregateCtEntry(t *testing.T) {
 				Packets:         110,
 				Bytes:           7000,
 				Count:           2,
-				Source:          &flowpb.Endpoint{PodName: "pod-src-v4"},
-				Destination:     &flowpb.Endpoint{PodName: "pod-dst-v4"},
+				Source:          &flowpb.Endpoint{ID: 1, PodName: "pod-src-v4"},
+				Destination:     &flowpb.Endpoint{ID: 1, PodName: "pod-dst-v4"},
 				Service:         &flowpb.Service{Name: "svc-revnat"},
 			},
 		},
@@ -221,8 +244,8 @@ func TestAggregateCtEntry(t *testing.T) {
 				Packets:         2,
 				Bytes:           200,
 				Count:           1,
-				Source:          &flowpb.Endpoint{PodName: "pod-src-natport"},
-				Destination:     &flowpb.Endpoint{PodName: "pod-dst-natport"},
+				Source:          &flowpb.Endpoint{ID: 1, PodName: "pod-src-natport"},
+				Destination:     &flowpb.Endpoint{ID: 1, PodName: "pod-dst-natport"},
 				Service:         &flowpb.Service{Name: "svc-natport"},
 			},
 		},
@@ -255,8 +278,8 @@ func TestAggregateCtEntry(t *testing.T) {
 				Packets:         1,
 				Bytes:           80,
 				Count:           1,
-				Source:          &flowpb.Endpoint{PodName: "pod-src-v6"},
-				Destination:     &flowpb.Endpoint{PodName: "pod-dst-v6-b"},
+				Source:          &flowpb.Endpoint{ID: 1, PodName: "pod-src-v6"},
+				Destination:     &flowpb.Endpoint{ID: 1, PodName: "pod-dst-v6-b"},
 			},
 		},
 		{
@@ -288,15 +311,50 @@ func TestAggregateCtEntry(t *testing.T) {
 				Packets:         6,
 				Bytes:           400,
 				Count:           1,
-				Source:          &flowpb.Endpoint{PodName: "pod-src-v6"},
-				Destination:     &flowpb.Endpoint{PodName: "pod-dst-v6-c"},
+				Source:          &flowpb.Endpoint{ID: 1, PodName: "pod-src-v6"},
+				Destination:     &flowpb.Endpoint{ID: 1, PodName: "pod-dst-v6-c"},
+			},
+		},
+		{
+			// Neither address belongs to a known endpoint: both are
+			// resolved to their owning node instead.
+			record: ctmap.CtMapRecord{
+				Key: &ctmap.CtKey4Global{
+					TupleKey4Global: tuple.TupleKey4Global{
+						TupleKey4: tuple.TupleKey4{
+							SourceAddr: types.IPv4{10, 0, 0, 9},
+							DestAddr:   types.IPv4{10, 0, 0, 10},
+							SourcePort: byteorder.HostToNetwork16(4444),
+							DestPort:   byteorder.HostToNetwork16(80),
+							NextHeader: u8proto.TCP,
+						},
+					},
+				},
+				Value: ctmap.CtEntry{
+					Packets: 3,
+					Bytes:   300,
+				},
+			},
+			// Non-SERVICE entries are stored reversed (see aggregateCtKey),
+			// so the resolved source/destination end up swapped relative to
+			// the record's own SourceAddr/DestAddr.
+			assertEntry: &observerpb.ConntrackEntry{
+				SourceIp:            "10.0.0.10",
+				DestinationIp:       "10.0.0.9",
+				DestinationPort:     80,
+				Protocol:            uint32(u8proto.TCP),
+				Packets:             3,
+				Bytes:               300,
+				Count:               1,
+				SourceNodeName:      "node-b",
+				DestinationNodeName: "node-a",
 			},
 		},
 	} {
 		key, ok := aggregateCtKey(s.record.Key)
 		require.True(t, ok, "failed to aggregate key")
 
-		aggregateCtEntry(entries, s.record.Key, &s.record.Value, epGetter, svcGetter)
+		aggregateCtEntry(entries, s.record.Key, &s.record.Value, epGetter, svcGetter, nodeGetter)
 		e, ok := entries[key]
 		require.True(t, ok, "expected aggregation key not found")
 		require.Equal(t, s.assertEntry.String(), e.String())

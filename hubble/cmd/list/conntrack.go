@@ -135,8 +135,8 @@ func conntrackTableOutput(buf io.Writer, nodes []*nodeConntrack) error {
 				svc = fmt.Sprintf("%s/%s", v.GetService().GetNamespace(), v.GetService().GetName())
 			}
 			fmt.Fprint(tw,
-				fmt.Sprintf("%s %s", v.GetSourceIp(), conntrackEndpointLabel(v.GetSource())), "\t",
-				fmt.Sprintf("%s:%d %s", v.GetDestinationIp(), v.GetDestinationPort(), conntrackEndpointLabel(v.GetDestination())), "\t",
+				fmt.Sprintf("%s %s", v.GetSourceIp(), conntrackEndpointLabel(v.GetSource(), v.GetSourceNodeName())), "\t",
+				fmt.Sprintf("%s:%d %s", v.GetDestinationIp(), v.GetDestinationPort(), conntrackEndpointLabel(v.GetDestination(), v.GetDestinationNodeName())), "\t",
 				conntrackProtocolName(v.GetProtocol()), "\t",
 				v.GetPackets(), "\t",
 				v.GetBytes(), "\t",
@@ -197,8 +197,13 @@ func sortedEntries(entries []*observerpb.ConntrackEntry) []*observerpb.Conntrack
 	return entries
 }
 
-// conntrackEndpointLabel returns the best human-readable label for the endpoint.
-func conntrackEndpointLabel(ep *flowpb.Endpoint) string {
+// conntrackEndpointLabel returns the best human-readable label for the
+// address: the resolved endpoint, or the owning node's name if the address
+// belongs to a cluster node rather than an endpoint.
+func conntrackEndpointLabel(ep *flowpb.Endpoint, nodeName string) string {
+	if nodeName != "" {
+		return "(node=" + nodeName + ")"
+	}
 	id := conntrackIdentityLabel(ep)
 	name := conntrackEndpointName(ep)
 	if name != "" {

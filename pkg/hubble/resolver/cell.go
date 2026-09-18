@@ -22,6 +22,7 @@ var Cell = cell.Module(
 		NewDNSGetter,
 		NewServiceGetter,
 		NewIPGetter,
+		NewNodeGetter,
 		NewPodMetadataGetter,
 		NewLinkGetter,
 	),

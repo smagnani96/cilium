@@ -12,6 +12,7 @@ import (
 	"github.com/cilium/cilium/pkg/ipcache"
 	slim_corev1 "github.com/cilium/cilium/pkg/k8s/slim/k8s/api/core/v1"
 	"github.com/cilium/cilium/pkg/labels"
+	nodeTypes "github.com/cilium/cilium/pkg/node/types"
 	policyTypes "github.com/cilium/cilium/pkg/policy/types"
 )
 
@@ -55,6 +56,16 @@ type IPGetter interface {
 	// LookupSecIDByIP returns the corresponding security identity that
 	// the specified IP maps to as well as if the corresponding entry exists.
 	LookupSecIDByIP(ip netip.Addr) (ipcache.Identity, bool)
+}
+
+// NodeGetter fetches node metadata by IP address. It is used to resolve IPs
+// that belong to a cluster node itself (as opposed to an endpoint or a
+// service), e.g. for conntrack entries or flows involving host-to-host
+// traffic.
+type NodeGetter interface {
+	// GetNodeIdentityByIP returns the identity (name and cluster) of the
+	// node that owns the given IP address, if any.
+	GetNodeIdentityByIP(ip netip.Addr) (nodeTypes.Identity, bool)
 }
 
 // ServiceGetter fetches service metadata.

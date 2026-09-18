@@ -151,4 +151,10 @@ func aggregateCtEntry(
 	if e.GetService() == nil && val.GetService() != nil {
 		e.Service = val.GetService()
 	}
+	if e.SourceNodeName == "" && val.SourceNodeName != "" {
+		e.SourceNodeName = val.SourceNodeName
+	}
+	if e.DestinationNodeName == "" && val.DestinationNodeName != "" {
+		e.DestinationNodeName = val.DestinationNodeName
+	}
 }

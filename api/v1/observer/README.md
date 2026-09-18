@@ -58,6 +58,8 @@ by the 4-tuple consisting of source IP, destination IP, destination port, and pr
 | source | [flow.Endpoint](#flow-Endpoint) |  | source/destination are resolved from Cilium&#39;s identity/endpoint state at read time. Unset if the resolution failed. |
 | destination | [flow.Endpoint](#flow-Endpoint) |  |  |
 | service | [flow.Service](#flow-Service) |  | service is resolved from rev_nat_index or rev_nat_ip/port. Unset if the corresponding ID is 0 or could not be resolved. |
+| source_node_name | [string](#string) |  | source_node_name/destination_node_name are set when source_ip/ destination_ip belong to a cluster node itself, rather than to an endpoint. Unset otherwise. |
+| destination_node_name | [string](#string) |  |  |
 
 
 

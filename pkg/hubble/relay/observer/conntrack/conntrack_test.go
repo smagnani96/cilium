@@ -10,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	flowpb "github.com/cilium/cilium/api/v1/flow"
 	observerpb "github.com/cilium/cilium/api/v1/observer"
 	relaypb "github.com/cilium/cilium/api/v1/relay"
 	"github.com/cilium/cilium/pkg/time"
@@ -28,6 +29,22 @@ func TestAggregateGlobalCtEntry(t *testing.T) {
 		Packets:         20,
 		Bytes:           0,
 		Count:           2,
+	})
+
+	// Second observation of the very same connection, from node "b": lower
+	// packet count, higher byte count, and resolved Source/Service/node name.
+	svc := &flowpb.Service{Name: "svc"}
+	src := &flowpb.Endpoint{PodName: "client"}
+	aggregateCtEntry(entries, &observerpb.ConntrackEntry{
+		SourceIp:            "10.0.0.1",
+		DestinationIp:       "10.0.0.2",
+		DestinationPort:     80,
+		Protocol:            6,
+		Packets:             10,
+		Bytes:               5000,
+		Source:              src,
+		Service:             svc,
+		DestinationNodeName: "node-b",
 	})
 
 	// A distinct connection (different destination port) must not be merged
@@ -49,8 +66,15 @@ func TestAggregateGlobalCtEntry(t *testing.T) {
 	// Counters are reconciled by keeping the higher of the two independent
 	// measurements, not by summing them.
 	require.EqualValues(t, 20, merged.GetPackets())
-	require.EqualValues(t, 0, merged.GetBytes())
+	require.EqualValues(t, 5000, merged.GetBytes())
 	require.EqualValues(t, 2, merged.GetCount())
+	// Metadata is filled in from whichever entry resolved it first; the
+	// second entry's Source/Service are kept since the first had none, but
+	// the first entry never had a Destination to begin with.
+	require.Same(t, src, merged.Source)
+	require.Same(t, svc, merged.Service)
+	require.Nil(t, merged.Destination)
+	require.Equal(t, "node-b", merged.DestinationNodeName)
 
 	other := entries[ctAggregationKey{sourceIP: "10.0.0.1", destinationIP: "10.0.0.2", destinationPort: 443, protocol: 6}]
 	require.NotNil(t, other)

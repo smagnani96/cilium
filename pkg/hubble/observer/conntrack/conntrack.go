@@ -27,11 +27,12 @@ var ErrExporterDisabled = fmt.Errorf("conntrack exporter is disabled")
 
 // ctExporter is responsible for exporting conntrack entries from the datapath.
 type ctExporter struct {
-	cfg       Config
-	ctMaps    ctmap.CTMaps
-	logger    *slog.Logger
-	epGetter  resolverTypes.EndpointGetter
-	svcGetter resolverTypes.ServiceGetter
+	cfg        Config
+	ctMaps     ctmap.CTMaps
+	logger     *slog.Logger
+	epGetter   resolverTypes.EndpointGetter
+	svcGetter  resolverTypes.ServiceGetter
+	nodeGetter resolverTypes.NodeGetter
 
 	snapshot atomic.Pointer[ctTypes.Snapshot]
 	refresh  singleflight.Group
@@ -59,13 +60,15 @@ func newConntrackExporter(
 	log *slog.Logger,
 	epGetter resolverTypes.EndpointGetter,
 	svcGetter resolverTypes.ServiceGetter,
+	nodeGetter resolverTypes.NodeGetter,
 ) *ctExporter {
 	return &ctExporter{
-		cfg:       cfg,
-		ctMaps:    ctMaps,
-		logger:    log,
-		epGetter:  epGetter,
-		svcGetter: svcGetter,
+		cfg:        cfg,
+		ctMaps:     ctMaps,
+		logger:     log,
+		epGetter:   epGetter,
+		svcGetter:  svcGetter,
+		nodeGetter: nodeGetter,
 	}
 }
 
@@ -116,7 +119,7 @@ func (c *ctExporter) dumpSnapshot(ctx context.Context) (*ctTypes.Snapshot, error
 
 	for _, m := range c.ctMaps.ActiveMaps() {
 		err := m.DumpEntries(ctx, func(key ctmap.CtKey, val *ctmap.CtEntry) bool {
-			aggregateCtEntry(entries, key, val, c.epGetter, c.svcGetter)
+			aggregateCtEntry(entries, key, val, c.epGetter, c.svcGetter, c.nodeGetter)
 			return true
 		})
 		if err != nil {
@@ -181,6 +184,7 @@ func aggregateCtEntry(
 	val *ctmap.CtEntry,
 	epGetter resolverTypes.EndpointGetter,
 	svcGetter resolverTypes.ServiceGetter,
+	nodeGetter resolverTypes.NodeGetter,
 ) {
 	aggregateKey, ok := aggregateCtKey(key)
 	if !ok {
@@ -199,6 +203,18 @@ func aggregateCtEntry(
 			dpContext := resolverTypes.DatapathContext{}
 			e.Source = epGetter.ResolveEndpoint(aggregateKey.sourceIP, val.SourceSecurityID, dpContext)
 			e.Destination = epGetter.ResolveEndpoint(aggregateKey.destinationIP, 0, dpContext)
+		}
+		if nodeGetter != nil {
+			if e.Source.GetID() == 0 {
+				if identity, ok := nodeGetter.GetNodeIdentityByIP(aggregateKey.sourceIP); ok {
+					e.SourceNodeName = identity.Name
+				}
+			}
+			if e.Destination.GetID() == 0 {
+				if identity, ok := nodeGetter.GetNodeIdentityByIP(aggregateKey.destinationIP); ok {
+					e.DestinationNodeName = identity.Name
+				}
+			}
 		}
 		entries[aggregateKey] = e
 	}

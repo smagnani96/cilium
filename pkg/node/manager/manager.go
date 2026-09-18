@@ -103,6 +103,17 @@ type manager struct {
 	// nodes is the list of nodes. Access must be protected via mutex.
 	nodes map[nodeTypes.Identity]*nodeEntry
 
+	// nodeIPsMu protects nodeIPs against concurrent access. It is kept
+	// separate from mutex to avoid having to take the entry mutex ordering
+	// into account, since nodeIPs is a simple, self-contained reverse index.
+	nodeIPsMu lock.RWMutex
+
+	// nodeIPs is a reverse index from node address to the identity of the
+	// node it belongs to. It allows resolving a node by one of its IP
+	// addresses (e.g. to enrich a flow or conntrack entry) without scanning
+	// every node's IPAddresses.
+	nodeIPs map[netip.Addr]nodeTypes.Identity
+
 	// nodeHandlersMu protects the nodeHandlers map against concurrent access.
 	nodeHandlersMu lock.RWMutex
 	// nodeHandlers has a slice containing all node handlers subscribed to node
@@ -258,6 +269,7 @@ func New(
 	m := &manager{
 		logger:                       logger,
 		nodes:                        map[nodeTypes.Identity]*nodeEntry{},
+		nodeIPs:                      map[netip.Addr]nodeTypes.Identity{},
 		writer:                       writer,
 		conf:                         c,
 		clusterInfo:                  clusterInfo,
@@ -485,6 +497,40 @@ func worldLabelForPrefix(prefix netip.Prefix) labels.Labels {
 	return lbls
 }
 
+// addNodeIPs indexes the given addresses as belonging to identity in
+// nodeIPs.
+func (m *manager) addNodeIPs(identity nodeTypes.Identity, addresses []nodeTypes.Address) {
+	m.nodeIPsMu.Lock()
+	defer m.nodeIPsMu.Unlock()
+	for _, address := range addresses {
+		if addr, ok := netipx.FromStdIP(address.IP); ok {
+			m.nodeIPs[addr.Unmap()] = identity
+		}
+	}
+}
+
+// removeNodeIPs removes the given addresses from nodeIPs.
+func (m *manager) removeNodeIPs(addresses []nodeTypes.Address) {
+	m.nodeIPsMu.Lock()
+	defer m.nodeIPsMu.Unlock()
+	for _, address := range addresses {
+		if addr, ok := netipx.FromStdIP(address.IP); ok {
+			delete(m.nodeIPs, addr.Unmap())
+		}
+	}
+}
+
+// GetNodeIdentityByIP returns the identity of the node owning the given IP
+// address, if any. Unlike GetNodes, this does not require scanning every
+// node's addresses: it is served from a reverse index kept up to date by
+// NodeUpdated/NodeDeleted.
+func (m *manager) GetNodeIdentityByIP(ip netip.Addr) (nodeTypes.Identity, bool) {
+	m.nodeIPsMu.RLock()
+	defer m.nodeIPsMu.RUnlock()
+	identity, ok := m.nodeIPs[ip.Unmap()]
+	return identity, ok
+}
+
 // NodeUpdated is called after the information of a node has been updated. The
 // node in the manager is added or updated if the source is allowed to update
 // the node. If an update or addition has occurred, NodeUpdate() of the datapath
@@ -657,6 +703,8 @@ func (m *manager) NodeUpdated(n nodeTypes.Node) {
 		oldNode := entry.node
 		entry.node = n
 		m.upsertToNodeTable(&entry.node)
+		m.removeNodeIPs(oldNode.IPAddresses)
+		m.addNodeIPs(nodeIdentifier, n.IPAddresses)
 		if dpUpdate {
 			var errs error
 			m.Iter(func(nh node.Handler) {
@@ -698,6 +746,7 @@ func (m *manager) NodeUpdated(n nodeTypes.Node) {
 		m.nodes[nodeIdentifier] = entry
 		m.upsertToNodeTable(&entry.node)
 		m.mutex.Unlock()
+		m.addNodeIPs(nodeIdentifier, n.IPAddresses)
 		var errs error
 		if dpUpdate {
 			m.Iter(func(nh node.Handler) {
@@ -913,6 +962,7 @@ func (m *manager) NodeDeleted(n nodeTypes.Node) {
 
 	resource := ipcacheTypes.NewResourceID(ipcacheTypes.ResourceKindNode, "", n.Name)
 	m.removeNodeFromIPCache(entry.node, resource, nil, nil, nil, nil)
+	m.removeNodeIPs(entry.node.IPAddresses)
 	m.metrics.NumNodes.Dec()
 
 	entry.mutex.Lock()
