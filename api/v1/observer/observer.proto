@@ -37,6 +37,12 @@ service Observer {
 
     // ServerStatus returns some details about the running hubble server.
     rpc ServerStatus(ServerStatusRequest) returns (ServerStatusResponse) {}
+
+    // GetConntrackSnapshot returns the connection tracking snapshot currently
+    // present in the node's datapath conntrack maps. Because the underlying
+    // maps are LRU-based, the result is a best-effort snapshot: entries may
+    // be evicted or added while it is being produced.
+    rpc GetConntrackSnapshot(GetConntrackSnapshotRequest) returns (stream GetConntrackSnapshotResponse) {}
 }
 
 message ServerStatusRequest {}
@@ -276,6 +282,43 @@ message GetNamespacesResponse {
 message Namespace {
   string cluster = 1;
   string namespace = 2;
+}
+
+message GetConntrackSnapshotRequest {
+}
+
+// GetConntrackSnapshotResponse streams a header identifying the node and
+// time at which the following ConntrackEntry messages were read together
+// in one walk of the datapath conntrack maps, the entries themselves, or a
+// status update about the node. A header is always sent before the entries
+// it applies to.
+message GetConntrackSnapshotResponse {
+    oneof response_types {
+        GetConntrackSnapshotHeader header = 1;
+        ConntrackEntry entry = 2;
+        relay.NodeStatusEvent node_status = 3;
+    }
+}
+
+// GetConntrackSnapshotHeader identifies the node and time at which the
+// ConntrackEntry messages that follow it in the same
+// GetConntrackSnapshotResponse stream were read.
+message GetConntrackSnapshotHeader {
+    string node_name = 1;
+    google.protobuf.Timestamp computed_at = 2;
+}
+
+// ConntrackEntry is an entry from a node's datapath conntrack map, aggregated
+// by the 4-tuple consisting of source IP, destination IP, destination port, and protocol.
+message ConntrackEntry {
+    string source_ip = 1;
+    string destination_ip = 2;
+    uint32 destination_port = 3;
+    uint32 protocol = 4;
+
+    uint64 packets = 5;
+    uint64 bytes = 6;
+    uint64 count = 7;
 }
 
 // ExportEvent contains an event to be exported. Not to be used outside of the

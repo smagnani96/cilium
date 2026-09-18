@@ -5,7 +5,9 @@ package observer
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc/codes"
@@ -240,6 +242,108 @@ func (s *Server) GetNamespaces(ctx context.Context, req *observerpb.GetNamespace
 	}
 
 	return &observerpb.GetNamespacesResponse{Namespaces: nsManager.GetNamespaces()}, nil
+}
+
+// GetConntrackSnapshot implements observerpb.ObserverServer.GetConntrackSnapshot
+// by fanning out to every hubble peer and forwarding their per-node conntrack entries.
+func (s *Server) GetConntrackSnapshot(req *observerpb.GetConntrackSnapshotRequest, stream observerpb.Observer_GetConntrackSnapshotServer) error {
+	ctx := stream.Context()
+	if md, ok := metadata.FromIncomingContext(ctx); ok {
+		ctx = metadata.NewOutgoingContext(ctx, md)
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	g, gctx := errgroup.WithContext(ctx)
+	peers := s.peers.List()
+	groups := make(chan []*observerpb.GetConntrackSnapshotResponse, len(peers))
+
+	for _, p := range peers {
+		if !isAvailable(p.Conn) {
+			s.opts.log.Info(
+				"No connection to peer, skipping",
+				logfields.Address, p.Address,
+				logfields.Peer, p.Name,
+			)
+			continue
+		}
+
+		g.Go(func() error {
+			client := s.opts.ocb.observerClient(&p)
+			peerStream, err := client.GetConntrackSnapshot(gctx, req)
+			if err != nil {
+				s.opts.log.Warn(
+					"Failed to start conntrack dump",
+					logfields.Error, err,
+					logfields.Peer, p.Name,
+				)
+				select {
+				case groups <- []*observerpb.GetConntrackSnapshotResponse{conntrackNodeStatusError(err, p.Name)}:
+				case <-gctx.Done():
+				}
+				return nil
+			}
+			var group []*observerpb.GetConntrackSnapshotResponse
+			for {
+				resp, err := peerStream.Recv()
+				if errors.Is(err, io.EOF) {
+					break
+				}
+				if err != nil {
+					s.opts.log.Warn(
+						"Failed to receive conntrack entry",
+						logfields.Error, err,
+						logfields.Peer, p.Name,
+					)
+					group = append(group, conntrackNodeStatusError(err, p.Name))
+					break
+				}
+				group = append(group, resp)
+			}
+			select {
+			case groups <- group:
+			case <-gctx.Done():
+				return gctx.Err()
+			}
+			return nil
+		})
+	}
+
+	var gErr error
+	go func() {
+		gErr = g.Wait()
+		close(groups)
+	}()
+
+	for group := range groups {
+		for _, resp := range group {
+			if err := stream.Send(resp); err != nil {
+				cancel()
+				return err
+			}
+		}
+	}
+
+	return gErr
+}
+
+// conntrackNodeStatusError wraps err into a GetConntrackSnapshotResponse
+// reporting a NODE_ERROR for nodeName, so a per-peer failure.
+func conntrackNodeStatusError(err error, nodeName string) *observerpb.GetConntrackSnapshotResponse {
+	msg := err.Error()
+	if s, ok := grpcStatus.FromError(err); ok && s.Code() == codes.Unknown {
+		msg = s.Message()
+	}
+
+	return &observerpb.GetConntrackSnapshotResponse{
+		ResponseTypes: &observerpb.GetConntrackSnapshotResponse_NodeStatus{
+			NodeStatus: &relaypb.NodeStatusEvent{
+				StateChange: relaypb.NodeState_NODE_ERROR,
+				NodeNames:   []string{nodeName},
+				Message:     msg,
+			},
+		},
+	}
 }
 
 // ServerStatus implements observerpb.ObserverServer.ServerStatus by aggregating

@@ -29,6 +29,7 @@ import (
 	"github.com/cilium/cilium/pkg/hubble/metrics"
 	"github.com/cilium/cilium/pkg/hubble/monitor"
 	"github.com/cilium/cilium/pkg/hubble/observer"
+	ctTypes "github.com/cilium/cilium/pkg/hubble/observer/conntrack/types"
 	"github.com/cilium/cilium/pkg/hubble/observer/namespace"
 	"github.com/cilium/cilium/pkg/hubble/observer/observeroption"
 	"github.com/cilium/cilium/pkg/hubble/parser"
@@ -57,14 +58,15 @@ type hubbleIntegration struct {
 	// It is used to report the cell status to the daemon when probed using Status().
 	launchError atomic.Pointer[string]
 
-	identityAllocator identitycell.CachingIdentityAllocator
-	endpointManager   endpointmanager.EndpointManager
-	ipcache           *ipcache.IPCache
-	cgroupManager     manager.CGroupManager
-	nodeLocalStore    *node.LocalNodeStore
-	monitorAgent      monitorAgent.Agent
-	tlsConfigPromise  tlsConfigPromise
-	exporters         []exporter.FlowLogExporter
+	identityAllocator  identitycell.CachingIdentityAllocator
+	endpointManager    endpointmanager.EndpointManager
+	ipcache            *ipcache.IPCache
+	cgroupManager      manager.CGroupManager
+	nodeLocalStore     *node.LocalNodeStore
+	monitorAgent       monitorAgent.Agent
+	tlsConfigPromise   tlsConfigPromise
+	ctSnapshotExporter ctTypes.CTSnapshotExporter
+	exporters          []exporter.FlowLogExporter
 
 	// dropEventEmitter emits Kubernetes events for packet drops.
 	dropEventEmitter dropeventemitter.FlowProcessor
@@ -92,6 +94,7 @@ func createHubbleIntegration(
 	nodeLocalStore *node.LocalNodeStore,
 	monitorAgent monitorAgent.Agent,
 	tlsConfigPromise tlsConfigPromise,
+	ctSnapshotExporter ctTypes.CTSnapshotExporter,
 	observerOptions []observeroption.Option,
 	exporterBuilders []*exportercell.FlowLogExporterBuilder,
 	dropEventEmitter dropeventemitter.FlowProcessor,
@@ -122,6 +125,7 @@ func createHubbleIntegration(
 		nodeLocalStore:       nodeLocalStore,
 		monitorAgent:         monitorAgent,
 		tlsConfigPromise:     tlsConfigPromise,
+		ctSnapshotExporter:   ctSnapshotExporter,
 		observerOptions:      observerOptions,
 		exporters:            exporters,
 		dropEventEmitter:     dropEventEmitter,
@@ -268,6 +272,7 @@ func (h *hubbleIntegration) launch(ctx context.Context) (*observer.LocalObserver
 	hubbleObserver, err := observer.NewLocalServer(
 		h.payloadParser,
 		h.nsManager,
+		h.ctSnapshotExporter,
 		h.log,
 		observerOpts...,
 	)

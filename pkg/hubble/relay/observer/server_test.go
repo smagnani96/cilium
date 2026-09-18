@@ -1514,6 +1514,249 @@ func TestServerStatus(t *testing.T) {
 	}
 }
 
+func TestGetConntrackSnapshot_PeerError(t *testing.T) {
+	peers := []poolTypes.Peer{
+		{
+			Peer: peerTypes.Peer{
+				Name:    "ok",
+				Address: &net.TCPAddr{IP: net.ParseIP("192.0.2.1"), Port: defaults.ServerPort},
+			},
+			Conn: &testutils.FakeClientConn{OnGetState: func() connectivity.State { return connectivity.Ready }},
+		},
+		{
+			Peer: peerTypes.Peer{
+				Name:    "bad",
+				Address: &net.TCPAddr{IP: net.ParseIP("192.0.2.2"), Port: defaults.ServerPort},
+			},
+			Conn: &testutils.FakeClientConn{OnGetState: func() connectivity.State { return connectivity.Ready }},
+		},
+	}
+
+	ocb := fakeObserverClientBuilder{
+		onObserverClient: func(p *poolTypes.Peer) observerpb.ObserverClient {
+			return &testutils.FakeObserverClient{
+				OnGetConntrackSnapshot: func(_ context.Context, _ *observerpb.GetConntrackSnapshotRequest, _ ...grpc.CallOption) (observerpb.Observer_GetConntrackSnapshotClient, error) {
+					if p.Name == "bad" {
+						return nil, fmt.Errorf("bad")
+					}
+					var sent bool
+					return &testutils.FakeGetConntrackSnapshotClient{
+						OnRecv: func() (*observerpb.GetConntrackSnapshotResponse, error) {
+							if sent {
+								return nil, io.EOF
+							}
+							sent = true
+							return &observerpb.GetConntrackSnapshotResponse{
+								ResponseTypes: &observerpb.GetConntrackSnapshotResponse_Header{
+									Header: &observerpb.GetConntrackSnapshotHeader{NodeName: p.Name},
+								},
+							}, nil
+						},
+					}, nil
+				},
+			}
+		},
+	}
+
+	logger := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
+	srv, err := NewServer(
+		&testutils.FakePeerLister{OnList: func() []poolTypes.Peer { return peers }},
+		WithLogger(logger),
+		withObserverClientBuilder(ocb),
+	)
+	require.NoError(t, err)
+
+	var got []*observerpb.GetConntrackSnapshotResponse
+	stream := &testutils.FakeGetConntrackSnapshotServer{
+		FakeGRPCServerStream: &testutils.FakeGRPCServerStream{OnContext: context.TODO},
+		OnSend: func(resp *observerpb.GetConntrackSnapshotResponse) error {
+			got = append(got, resp)
+			return nil
+		},
+	}
+
+	err = srv.GetConntrackSnapshot(&observerpb.GetConntrackSnapshotRequest{}, stream)
+	require.NoError(t, err)
+
+	var entries []*observerpb.GetConntrackSnapshotResponse
+	var statuses []*relaypb.NodeStatusEvent
+	for _, resp := range got {
+		if ns := resp.GetNodeStatus(); ns != nil {
+			statuses = append(statuses, ns)
+			continue
+		}
+		entries = append(entries, resp)
+	}
+
+	if diff := cmp.Diff(
+		[]*observerpb.GetConntrackSnapshotResponse{{
+			ResponseTypes: &observerpb.GetConntrackSnapshotResponse_Header{
+				Header: &observerpb.GetConntrackSnapshotHeader{NodeName: "ok"},
+			},
+		}},
+		entries,
+		cmpopts.IgnoreUnexported(observerpb.GetConntrackSnapshotResponse{}, observerpb.GetConntrackSnapshotHeader{}),
+	); diff != "" {
+		t.Errorf("entries mismatch (-want +got):\n%s", diff)
+	}
+
+	require.Len(t, statuses, 1)
+	assert.Equal(t, relaypb.NodeState_NODE_ERROR, statuses[0].GetStateChange())
+	assert.Equal(t, []string{"bad"}, statuses[0].GetNodeNames())
+	assert.Contains(t, statuses[0].GetMessage(), "bad")
+}
+
+func TestGetConntrackSnapshot(t *testing.T) {
+	peers := func() []poolTypes.Peer {
+		return []poolTypes.Peer{
+			{
+				Peer: peerTypes.Peer{
+					Name: "one",
+					Address: &net.TCPAddr{
+						IP:   net.ParseIP("192.0.2.1"),
+						Port: defaults.ServerPort,
+					},
+				},
+				Conn: &testutils.FakeClientConn{
+					OnGetState: func() connectivity.State {
+						return connectivity.Ready
+					},
+				},
+			},
+			{
+				Peer: peerTypes.Peer{
+					Name: "two",
+					Address: &net.TCPAddr{
+						IP:   net.ParseIP("192.0.2.2"),
+						Port: defaults.ServerPort,
+					},
+				},
+				Conn: &testutils.FakeClientConn{
+					OnGetState: func() connectivity.State {
+						return connectivity.Ready
+					},
+				},
+			},
+		}
+	}
+	type want struct {
+		groups [][]*observerpb.GetConntrackSnapshotResponse
+		err    error
+	}
+	// onClientFor returns an observerClientBuilder whose GetConntrackSnapshot
+	// answers with a header followed by a single entry, both tagged with the
+	// peer's own name, and panics if invoked for a peer name in skip.
+	onClientFor := func(skip ...string) observerClientBuilder {
+		return fakeObserverClientBuilder{
+			onObserverClient: func(p *poolTypes.Peer) observerpb.ObserverClient {
+				for _, name := range skip {
+					if p.Name == name {
+						panic("peer " + name + " should have been filtered out before being dialed")
+					}
+				}
+				msgs := []*observerpb.GetConntrackSnapshotResponse{
+					{ResponseTypes: &observerpb.GetConntrackSnapshotResponse_Header{
+						Header: &observerpb.GetConntrackSnapshotHeader{NodeName: p.Name},
+					}},
+					{ResponseTypes: &observerpb.GetConntrackSnapshotResponse_Entry{
+						Entry: &observerpb.ConntrackEntry{SourceIp: p.Name},
+					}},
+				}
+				return &testutils.FakeObserverClient{
+					OnGetConntrackSnapshot: func(_ context.Context, _ *observerpb.GetConntrackSnapshotRequest, _ ...grpc.CallOption) (observerpb.Observer_GetConntrackSnapshotClient, error) {
+						i := 0
+						return &testutils.FakeGetConntrackSnapshotClient{
+							OnRecv: func() (*observerpb.GetConntrackSnapshotResponse, error) {
+								if i >= len(msgs) {
+									return nil, io.EOF
+								}
+								m := msgs[i]
+								i++
+								return m, nil
+							},
+						}, nil
+					},
+				}
+			},
+		}
+	}
+	tests := []struct {
+		name string
+		plr  PeerLister
+		ocb  observerClientBuilder
+		req  *observerpb.GetConntrackSnapshotRequest
+		want want
+	}{
+		{
+			name: "no node filter dumps every peer",
+			plr:  &testutils.FakePeerLister{OnList: peers},
+			ocb:  onClientFor(),
+			req:  &observerpb.GetConntrackSnapshotRequest{},
+			want: want{
+				groups: [][]*observerpb.GetConntrackSnapshotResponse{
+					{
+						{ResponseTypes: &observerpb.GetConntrackSnapshotResponse_Header{
+							Header: &observerpb.GetConntrackSnapshotHeader{NodeName: "one"},
+						}},
+						{ResponseTypes: &observerpb.GetConntrackSnapshotResponse_Entry{
+							Entry: &observerpb.ConntrackEntry{SourceIp: "one"},
+						}},
+					},
+					{
+						{ResponseTypes: &observerpb.GetConntrackSnapshotResponse_Header{
+							Header: &observerpb.GetConntrackSnapshotHeader{NodeName: "two"},
+						}},
+						{ResponseTypes: &observerpb.GetConntrackSnapshotResponse_Entry{
+							Entry: &observerpb.ConntrackEntry{SourceIp: "two"},
+						}},
+					},
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			logger := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
+			srv, err := NewServer(
+				tt.plr,
+				WithLogger(logger),
+				withObserverClientBuilder(tt.ocb),
+			)
+			assert.NoError(t, err)
+
+			var got []*observerpb.GetConntrackSnapshotResponse
+			stream := &testutils.FakeGetConntrackSnapshotServer{
+				FakeGRPCServerStream: &testutils.FakeGRPCServerStream{OnContext: context.TODO},
+				OnSend: func(resp *observerpb.GetConntrackSnapshotResponse) error {
+					got = append(got, resp)
+					return nil
+				},
+			}
+
+			err = srv.GetConntrackSnapshot(tt.req, stream)
+			assert.Equal(t, tt.want.err, err)
+
+			// Regroup the flat stream by header boundary: a peer's header
+			// must never end up separated from its own entries by another
+			// peer's messages.
+			var groups [][]*observerpb.GetConntrackSnapshotResponse
+			for _, resp := range got {
+				if resp.GetHeader() != nil {
+					groups = append(groups, nil)
+				}
+				groups[len(groups)-1] = append(groups[len(groups)-1], resp)
+			}
+
+			if diff := cmp.Diff(tt.want.groups, groups, cmpopts.SortSlices(func(a, b []*observerpb.GetConntrackSnapshotResponse) bool {
+				return a[0].GetHeader().GetNodeName() < b[0].GetHeader().GetNodeName()
+			}), cmpopts.IgnoreUnexported(observerpb.GetConntrackSnapshotResponse{}, observerpb.GetConntrackSnapshotHeader{}, observerpb.ConntrackEntry{})); diff != "" {
+				t.Errorf("groups mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
 type fakeObserverClientBuilder struct {
 	onObserverClient func(*poolTypes.Peer) observerpb.ObserverClient
 }

@@ -799,6 +799,38 @@ func TestPrivilegedCount(t *testing.T) {
 	assert.Equal(t, len(cache), batchCount)
 }
 
+func TestPrivilegedDumpEntries(t *testing.T) {
+	setupCTMap(t)
+
+	prev := option.Config.CTMapEntriesGlobalTCP
+	defer func() { option.Config.CTMapEntriesGlobalTCP = prev }()
+	option.Config.CTMapEntriesGlobalTCP = 524288
+	size := 4096
+
+	m := newMap(MapNameTCP4Global+"_test", mapTypeIPv4TCPGlobal)
+	require.NoError(t, m.OpenOrCreate())
+	require.NoError(t, m.Map.Unpin())
+
+	cache := populateFakeDataCTMap4(t, m, size)
+	want := make(map[CtKey4Global]CtEntry, len(cache))
+	for k := range cache {
+		v, err := m.Lookup(k)
+		require.NoError(t, err)
+		want[*k] = *(v.(*CtEntry))
+	}
+
+	got := make(map[CtKey4Global]CtEntry, len(cache))
+	err := m.DumpEntries(context.TODO(), func(key CtKey, entry *CtEntry) bool {
+		k, ok := key.(*CtKey4Global)
+		require.True(t, ok)
+		got[*k] = *entry
+		return true
+	})
+	require.NoError(t, err)
+
+	assert.Equal(t, want, got)
+}
+
 // TestPrivilegedCtGCWithNetworkID tests the injection of additional CT maps for GC
 func TestPrivilegedCtNetworkID(t *testing.T) {
 	setupCTMap(t)

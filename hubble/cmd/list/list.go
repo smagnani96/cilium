@@ -33,6 +33,7 @@ func New(vp *viper.Viper) *cobra.Command {
 	listCmd.AddCommand(
 		newNodeCommand(vp),
 		newNamespacesCommand(vp),
+		newConntrackCommand(vp),
 	)
 	return listCmd
 }

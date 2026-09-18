@@ -21,6 +21,7 @@ import (
 	cgroupManager "github.com/cilium/cilium/pkg/cgroups/manager"
 	"github.com/cilium/cilium/pkg/endpoint"
 	"github.com/cilium/cilium/pkg/endpointmanager"
+	ctTypes "github.com/cilium/cilium/pkg/hubble/observer/conntrack/types"
 	peerTypes "github.com/cilium/cilium/pkg/hubble/peer/types"
 	poolTypes "github.com/cilium/cilium/pkg/hubble/relay/pool/types"
 	resolverTypes "github.com/cilium/cilium/pkg/hubble/resolver/types"
@@ -62,15 +63,31 @@ func (s *FakeGetAgentEventsServer) Send(response *observerpb.GetAgentEventsRespo
 	panic("OnSend not set")
 }
 
+// FakeGetConntrackSnapshotServer is used for unit tests and implements the
+// observerpb.Observer_GetConntrackSnapshotServer interface.
+type FakeGetConntrackSnapshotServer struct {
+	OnSend func(response *observerpb.GetConntrackSnapshotResponse) error
+	*FakeGRPCServerStream
+}
+
+// Send implements observerpb.Observer_GetConntrackSnapshotServer.Send.
+func (s *FakeGetConntrackSnapshotServer) Send(response *observerpb.GetConntrackSnapshotResponse) error {
+	if s.OnSend != nil {
+		return s.OnSend(response)
+	}
+	panic("OnSend not set")
+}
+
 // FakeObserverClient is used for unit tests and implements the
 // observerpb.ObserverClient interface.
 type FakeObserverClient struct {
-	OnGetFlows       func(ctx context.Context, in *observerpb.GetFlowsRequest, opts ...grpc.CallOption) (observerpb.Observer_GetFlowsClient, error)
-	OnGetAgentEvents func(ctx context.Context, in *observerpb.GetAgentEventsRequest, opts ...grpc.CallOption) (observerpb.Observer_GetAgentEventsClient, error)
-	OnGetDebugEvents func(ctx context.Context, in *observerpb.GetDebugEventsRequest, opts ...grpc.CallOption) (observerpb.Observer_GetDebugEventsClient, error)
-	OnGetNodes       func(ctx context.Context, in *observerpb.GetNodesRequest, opts ...grpc.CallOption) (*observerpb.GetNodesResponse, error)
-	OnGetNamespaces  func(ctx context.Context, in *observerpb.GetNamespacesRequest, opts ...grpc.CallOption) (*observerpb.GetNamespacesResponse, error)
-	OnServerStatus   func(ctx context.Context, in *observerpb.ServerStatusRequest, opts ...grpc.CallOption) (*observerpb.ServerStatusResponse, error)
+	OnGetFlows             func(ctx context.Context, in *observerpb.GetFlowsRequest, opts ...grpc.CallOption) (observerpb.Observer_GetFlowsClient, error)
+	OnGetAgentEvents       func(ctx context.Context, in *observerpb.GetAgentEventsRequest, opts ...grpc.CallOption) (observerpb.Observer_GetAgentEventsClient, error)
+	OnGetDebugEvents       func(ctx context.Context, in *observerpb.GetDebugEventsRequest, opts ...grpc.CallOption) (observerpb.Observer_GetDebugEventsClient, error)
+	OnGetNodes             func(ctx context.Context, in *observerpb.GetNodesRequest, opts ...grpc.CallOption) (*observerpb.GetNodesResponse, error)
+	OnGetNamespaces        func(ctx context.Context, in *observerpb.GetNamespacesRequest, opts ...grpc.CallOption) (*observerpb.GetNamespacesResponse, error)
+	OnServerStatus         func(ctx context.Context, in *observerpb.ServerStatusRequest, opts ...grpc.CallOption) (*observerpb.ServerStatusResponse, error)
+	OnGetConntrackSnapshot func(ctx context.Context, in *observerpb.GetConntrackSnapshotRequest, opts ...grpc.CallOption) (observerpb.Observer_GetConntrackSnapshotClient, error)
 }
 
 // GetFlows implements observerpb.ObserverClient.GetFlows.
@@ -119,6 +136,29 @@ func (c *FakeObserverClient) ServerStatus(ctx context.Context, in *observerpb.Se
 		return c.OnServerStatus(ctx, in, opts...)
 	}
 	panic("OnServerStatus not set")
+}
+
+// GetConntrackSnapshot implements observerpb.ObserverClient.GetConntrackSnapshot.
+func (c *FakeObserverClient) GetConntrackSnapshot(ctx context.Context, in *observerpb.GetConntrackSnapshotRequest, opts ...grpc.CallOption) (observerpb.Observer_GetConntrackSnapshotClient, error) {
+	if c.OnGetConntrackSnapshot != nil {
+		return c.OnGetConntrackSnapshot(ctx, in, opts...)
+	}
+	panic("OnGetConntrackSnapshot not set")
+}
+
+// FakeGetConntrackSnapshotClient is used for unit tests and implements the
+// observerpb.Observer_GetConntrackSnapshotClient interface.
+type FakeGetConntrackSnapshotClient struct {
+	OnRecv func() (*observerpb.GetConntrackSnapshotResponse, error)
+	*FakeGRPCClientStream
+}
+
+// Recv implements observerpb.Observer_GetConntrackSnapshotClient.Recv.
+func (c *FakeGetConntrackSnapshotClient) Recv() (*observerpb.GetConntrackSnapshotResponse, error) {
+	if c.OnRecv != nil {
+		return c.OnRecv()
+	}
+	panic("OnRecv not set")
 }
 
 // FakeGetFlowsClient is used for unit tests and implements the
@@ -578,3 +618,13 @@ var NoopNamespaceManager = &FakeNamespaceManager{
 	},
 	OnAddNamespace: func(_ *observerpb.Namespace) {},
 }
+
+// FakeCTExporter is used for unit tests that need a mapexporter.Exporter.
+type FakeCTExporter struct{}
+
+// GetConntrackSnapshot implements mapexporter.Exporter.
+func (f *FakeCTExporter) GetConntrackSnapshot(ctx context.Context) (*ctTypes.Snapshot, error) {
+	panic("GetConntrackSnapshot not set")
+}
+
+var NoopCTExporter = &FakeCTExporter{}

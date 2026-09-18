@@ -23,6 +23,7 @@ import (
 	"github.com/cilium/cilium/pkg/hubble/build"
 	"github.com/cilium/cilium/pkg/hubble/container"
 	"github.com/cilium/cilium/pkg/hubble/filters"
+	ctTypes "github.com/cilium/cilium/pkg/hubble/observer/conntrack/types"
 	"github.com/cilium/cilium/pkg/hubble/observer/namespace"
 	"github.com/cilium/cilium/pkg/hubble/observer/observeroption"
 	observerTypes "github.com/cilium/cilium/pkg/hubble/observer/types"
@@ -67,12 +68,15 @@ type LocalObserverServer struct {
 	numObservedFlows atomic.Uint64
 
 	nsManager namespace.Manager
+
+	ctExporter ctTypes.CTSnapshotExporter
 }
 
 // NewLocalServer returns a new local observer server.
 func NewLocalServer(
 	payloadParser parser.Decoder,
 	nsManager namespace.Manager,
+	ctSnapshotExporter ctTypes.CTSnapshotExporter,
 	logger *slog.Logger,
 	options ...observeroption.Option,
 ) (*LocalObserverServer, error) {
@@ -98,6 +102,7 @@ func NewLocalServer(
 		payloadParser: payloadParser,
 		startTime:     time.Now(),
 		nsManager:     nsManager,
+		ctExporter:    ctSnapshotExporter,
 		opts:          opts,
 	}
 
@@ -254,6 +259,43 @@ func (s *LocalObserverServer) GetNodes(ctx context.Context, req *observerpb.GetN
 // GetNamespaces implements observerpb.ObserverClient.GetNamespaces.
 func (s *LocalObserverServer) GetNamespaces(ctx context.Context, req *observerpb.GetNamespacesRequest) (*observerpb.GetNamespacesResponse, error) {
 	return &observerpb.GetNamespacesResponse{Namespaces: s.nsManager.GetNamespaces()}, nil
+}
+
+// GetConntrackSnapshot implements observerpb.ObserverServer.GetConntrackSnapshot.
+func (s *LocalObserverServer) GetConntrackSnapshot(
+	req *observerpb.GetConntrackSnapshotRequest,
+	server observerpb.Observer_GetConntrackSnapshotServer,
+) error {
+	ctx := server.Context()
+
+	snap, err := s.ctExporter.GetConntrackSnapshot(ctx)
+	if err != nil {
+		return err
+	}
+
+	if err := server.Send(&observerpb.GetConntrackSnapshotResponse{
+		ResponseTypes: &observerpb.GetConntrackSnapshotResponse_Header{
+			Header: &observerpb.GetConntrackSnapshotHeader{
+				NodeName:   nodeTypes.GetAbsoluteNodeName(),
+				ComputedAt: timestamppb.New(snap.ComputedAt),
+			},
+		},
+	}); err != nil {
+		return err
+	}
+
+	for _, e := range snap.Entries {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := server.Send(&observerpb.GetConntrackSnapshotResponse{
+			ResponseTypes: &observerpb.GetConntrackSnapshotResponse_Entry{Entry: e},
+		}); err != nil {
+			return err
+		}
+	}
+
+	return ctx.Err()
 }
 
 // GetFlows implements the proto method for client requests.
