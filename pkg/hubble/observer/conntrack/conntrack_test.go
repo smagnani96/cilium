@@ -7,6 +7,7 @@ import (
 	"context"
 	"net/netip"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
@@ -33,7 +34,7 @@ func (m *mockCTStatsMaps) MaxEntries() int {
 }
 
 func TestConntrackExporter_Disabled(t *testing.T) {
-	c := newCTStatsExporter(Config{}, &option.DaemonConfig{BPFConntrackAccounting: false}, &mockCTStatsMaps{}, hivetest.Logger(t), nil)
+	c := newCTStatsExporter(Config{ConntrackCacheTTL: 30 * time.Second}, &option.DaemonConfig{BPFConntrackAccounting: false}, &mockCTStatsMaps{}, hivetest.Logger(t), nil, nil)
 	require.False(t, c.Enabled())
 	snap, err := c.GetConntrackStats(t.Context())
 	require.ErrorIs(t, err, ErrExporterDisabled)
@@ -41,7 +42,7 @@ func TestConntrackExporter_Disabled(t *testing.T) {
 }
 
 func TestConntrackExporter_Enabled(t *testing.T) {
-	c := newCTStatsExporter(Config{}, &option.DaemonConfig{BPFConntrackAccounting: true}, &mockCTStatsMaps{}, hivetest.Logger(t), nil)
+	c := newCTStatsExporter(Config{ConntrackCacheTTL: 30 * time.Second}, &option.DaemonConfig{BPFConntrackAccounting: true}, &mockCTStatsMaps{}, hivetest.Logger(t), nil, nil)
 	require.True(t, c.Enabled())
 	snap1, err := c.GetConntrackStats(t.Context())
 	require.NoError(t, err)
@@ -78,11 +79,11 @@ func TestCtStats_MergeInOutMirror(t *testing.T) {
 
 	outKey := newCtKey4("10.244.0.6", 40924, "10.244.1.151", 53, ctmap.TUPLE_F_OUT)
 	outValue := ctmap.StatsValues{{RxPackets: 1, RxBytes: 205, TxPackets: 1, TxBytes: 112}}
-	stats.merge(outKey, outValue, nil)
+	stats.merge(outKey, outValue, nil, nil)
 
 	inKey := newCtKey4("10.244.0.6", 40924, "10.244.1.151", 53, ctmap.TUPLE_F_IN)
 	inValue := ctmap.StatsValues{{RxPackets: 1, RxBytes: 112, TxPackets: 1, TxBytes: 205}}
-	stats.merge(inKey, inValue, nil)
+	stats.merge(inKey, inValue, nil, nil)
 
 	require.Len(t, stats.entries, 1)
 	var got *ctEntry
@@ -104,11 +105,11 @@ func TestCtStats_MergeInOutMirror_ReverseOrder(t *testing.T) {
 
 	inKey := newCtKey4("10.244.0.6", 40924, "10.244.1.151", 53, ctmap.TUPLE_F_IN)
 	inValue := ctmap.StatsValues{{RxPackets: 1, RxBytes: 112, TxPackets: 1, TxBytes: 205}}
-	stats.merge(inKey, inValue, nil)
+	stats.merge(inKey, inValue, nil, nil)
 
 	outKey := newCtKey4("10.244.0.6", 40924, "10.244.1.151", 53, ctmap.TUPLE_F_OUT)
 	outValue := ctmap.StatsValues{{RxPackets: 1, RxBytes: 205, TxPackets: 1, TxBytes: 112}}
-	stats.merge(outKey, outValue, nil)
+	stats.merge(outKey, outValue, nil, nil)
 
 	require.Len(t, stats.entries, 1)
 	var got *ctEntry
@@ -127,10 +128,10 @@ func TestCtStats_MergeKeepsServiceEntryDistinct(t *testing.T) {
 	stats := &ctStats{entries: make(map[mergeKey]*ctEntry)}
 
 	outKey := newCtKey4("10.244.0.6", 40924, "10.244.1.151", 53, ctmap.TUPLE_F_OUT)
-	stats.merge(outKey, ctmap.StatsValues{{RxPackets: 1, RxBytes: 205, TxPackets: 1, TxBytes: 112}}, nil)
+	stats.merge(outKey, ctmap.StatsValues{{RxPackets: 1, RxBytes: 205, TxPackets: 1, TxBytes: 112}}, nil, nil)
 
 	svcKey := newCtKey4("10.244.0.6", 40924, "10.244.1.151", 53, ctmap.TUPLE_F_SERVICE)
-	stats.merge(svcKey, ctmap.StatsValues{{RxPackets: 1, RxBytes: 205, TxPackets: 1, TxBytes: 112}}, nil)
+	stats.merge(svcKey, ctmap.StatsValues{{RxPackets: 1, RxBytes: 205, TxPackets: 1, TxBytes: 112}}, nil, nil)
 
 	require.Len(t, stats.entries, 2)
 }
@@ -149,10 +150,10 @@ func TestCtStats_MergeResolvesAndDedupsEndpoints(t *testing.T) {
 	stats := &ctStats{entries: make(map[mergeKey]*ctEntry), endpoints: NewEndpointDedup()}
 
 	firstKey := newCtKey4("10.244.0.6", 40924, "10.244.1.151", 53, ctmap.TUPLE_F_OUT)
-	stats.merge(firstKey, ctmap.StatsValues{{RxPackets: 1}}, epGetter)
+	stats.merge(firstKey, ctmap.StatsValues{{RxPackets: 1}}, epGetter, nil)
 
 	secondKey := newCtKey4("10.244.0.7", 51000, "10.244.1.151", 53, ctmap.TUPLE_F_OUT)
-	stats.merge(secondKey, ctmap.StatsValues{{RxPackets: 1}}, epGetter)
+	stats.merge(secondKey, ctmap.StatsValues{{RxPackets: 1}}, epGetter, nil)
 
 	require.Len(t, stats.entries, 2)
 

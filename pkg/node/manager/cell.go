@@ -5,6 +5,7 @@ package manager
 
 import (
 	"log/slog"
+	"net/netip"
 
 	"github.com/cilium/hive/cell"
 	"github.com/cilium/hive/job"
@@ -54,6 +55,14 @@ type NodeManager interface {
 	// GetNodeIdentities returns a list of all node identities store in node
 	// manager.
 	GetNodeIdentities() []types.Identity
+
+	// GetNodeIdentityByIP returns the identity of the node owning the given
+	// IP address, if any.
+	GetNodeIdentityByIP(ip netip.Addr) (types.Identity, bool)
+
+	// GetNodeByIdentity returns a copy of the node registered under
+	// identity, if any.
+	GetNodeByIdentity(identity types.Identity) (types.Node, bool)
 
 	// NodeUpdated is called when the store detects a change in node
 	// information

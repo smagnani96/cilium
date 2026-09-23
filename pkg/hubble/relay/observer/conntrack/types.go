@@ -15,6 +15,7 @@ import (
 type Stats interface {
 	Entries() iter.Seq[*observerpb.ConntrackStatsEntry]
 	Endpoints() iter.Seq[*observerpb.ConntrackStatsEndpoint]
+	Nodes() iter.Seq[*observerpb.ConntrackStatsNode]
 	NodeStatuses() []*observerpb.GetConntrackStatsResponse
 }
 

@@ -15,6 +15,14 @@ import (
 	policyTypes "github.com/cilium/cilium/pkg/policy/types"
 )
 
+// ResolvedNode holds identity data resolved for an IP address that belongs
+// to a cluster node itself, rather than to a known endpoint.
+type ResolvedNode struct {
+	Name    string
+	Cluster string
+	Labels  []string
+}
+
 type DatapathContext struct {
 	SrcIP                 netip.Addr
 	SrcLabelID            uint32
@@ -60,6 +68,16 @@ type IPGetter interface {
 // ServiceGetter fetches service metadata.
 type ServiceGetter interface {
 	GetServiceByAddr(ip netip.Addr, port uint16) *flowpb.Service
+}
+
+// NodeGetter resolves IPs that belong to a cluster node itself, as opposed
+// to an endpoint or a service, e.g. host-to-host or host-to-remote-node
+// traffic.
+type NodeGetter interface {
+	// ResolveNode resolves an IP address to the cluster node that owns it,
+	// if any. It returns nil if the address does not belong to a known
+	// node.
+	ResolveNode(ip netip.Addr) *ResolvedNode
 }
 
 // LinkGetter fetches local link information.

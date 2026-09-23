@@ -8,6 +8,7 @@ import (
 	"flag"
 	"log/slog"
 	"maps"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"testing"
@@ -223,6 +224,16 @@ func (d dummyNodeManager) GetNodeIdentities() []nodeTypes.Identity {
 
 // GetNodes implements manager.NodeManager.
 func (d dummyNodeManager) GetNodes() map[nodeTypes.Identity]nodeTypes.Node {
+	panic("unimplemented")
+}
+
+// GetNodeIdentityByIP implements manager.NodeManager.
+func (d dummyNodeManager) GetNodeIdentityByIP(ip netip.Addr) (nodeTypes.Identity, bool) {
+	panic("unimplemented")
+}
+
+// GetNodeByIdentity implements manager.NodeManager.
+func (d dummyNodeManager) GetNodeByIdentity(identity nodeTypes.Identity) (nodeTypes.Node, bool) {
 	panic("unimplemented")
 }
 

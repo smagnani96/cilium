@@ -14,6 +14,7 @@ import (
 type Stats interface {
 	Entries() iter.Seq[*observerpb.ConntrackStatsEntry]
 	Endpoints() iter.Seq[*observerpb.ConntrackStatsEndpoint]
+	Nodes() iter.Seq[*observerpb.ConntrackStatsNode]
 }
 
 // CTStatsExporter defines the interface for exporting conntrack stats.

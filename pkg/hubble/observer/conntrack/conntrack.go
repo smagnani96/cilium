@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	flowpb "github.com/cilium/cilium/api/v1/flow"
 	observerpb "github.com/cilium/cilium/api/v1/observer"
 	"github.com/cilium/cilium/pkg/hubble/observer/conntrack/types"
 	resolverTypes "github.com/cilium/cilium/pkg/hubble/resolver/types"
@@ -30,6 +31,7 @@ type ctStatsExporter struct {
 	ctStatsMaps ctmap.StatsMaps
 	logger      *slog.Logger
 	epGetter    resolverTypes.EndpointGetter
+	nodeGetter  resolverTypes.NodeGetter
 
 	stats   atomic.Pointer[ctStats]
 	refresh singleflight.Group
@@ -41,6 +43,7 @@ func newCTStatsExporter(
 	ctStatsMaps ctmap.StatsMaps,
 	log *slog.Logger,
 	epGetter resolverTypes.EndpointGetter,
+	nodeGetter resolverTypes.NodeGetter,
 ) *ctStatsExporter {
 	return &ctStatsExporter{
 		cfg:         cfg,
@@ -48,6 +51,7 @@ func newCTStatsExporter(
 		ctStatsMaps: ctStatsMaps,
 		logger:      log,
 		epGetter:    epGetter,
+		nodeGetter:  nodeGetter,
 	}
 }
 
@@ -137,10 +141,11 @@ func (c *ctStatsExporter) dumpStats(ctx context.Context) (*ctStats, error) {
 	stats := &ctStats{
 		entries:   make(map[mergeKey]*ctEntry),
 		endpoints: NewEndpointDedup(),
+		nodes:     NewNodeDedup(),
 	}
 
 	err := c.ctStatsMaps.DumpEntries(ctx, func(key ctmap.CtKey, value ctmap.StatsValues) bool {
-		stats.merge(key, value, c.epGetter)
+		stats.merge(key, value, c.epGetter, c.nodeGetter)
 		return true
 	})
 	if err != nil {
@@ -155,8 +160,11 @@ func (c *ctStatsExporter) dumpStats(ctx context.Context) (*ctStats, error) {
 // canonical (TUPLE_F_OUT) entry instead of keeping both or summing their
 // counters. While doing so, it resolves the source/destination Endpoint
 // (if epGetter is set) and records it in c.endpoints, so multiple entries
-// sharing the same resolved endpoint only pay for it once.
-func (c *ctStats) merge(key ctmap.CtKey, values ctmap.StatsValues, epGetter resolverTypes.EndpointGetter) {
+// sharing the same resolved endpoint only pay for it once. If an address
+// did not resolve to a genuine local endpoint (its Endpoint's ID is unset),
+// it additionally attempts to resolve it to a cluster node (if nodeGetter
+// is set), e.g. for host-to-host or host-to-remote-node traffic.
+func (c *ctStats) merge(key ctmap.CtKey, values ctmap.StatsValues, epGetter resolverTypes.EndpointGetter, nodeGetter resolverTypes.NodeGetter) {
 	srcAddr, dstAddr, srcPort, dstPort, protocol, flags, ok := ctKeyToTuple(key)
 	if !ok {
 		return
@@ -168,6 +176,9 @@ func (c *ctStats) merge(key ctmap.CtKey, values ctmap.StatsValues, epGetter reso
 		return
 	}
 
+	srcEp := resolveEndpoint(epGetter, srcAddr)
+	dstEp := resolveEndpoint(epGetter, dstAddr)
+
 	c.entries[mk] = &ctEntry{
 		srcAddr:        srcAddr,
 		dstAddr:        dstAddr,
@@ -176,19 +187,42 @@ func (c *ctStats) merge(key ctmap.CtKey, values ctmap.StatsValues, epGetter reso
 		protocol:       protocol,
 		flags:          flags,
 		value:          values.Aggregate(),
-		srcEndpointIdx: resolveEndpointIndex(epGetter, c.endpoints, srcAddr),
-		dstEndpointIdx: resolveEndpointIndex(epGetter, c.endpoints, dstAddr),
+		srcEndpointIdx: dedupEndpointIndex(c.endpoints, srcEp),
+		dstEndpointIdx: dedupEndpointIndex(c.endpoints, dstEp),
+		srcNodeIdx:     resolveNodeIndex(nodeGetter, c.nodes, srcEp, srcAddr),
+		dstNodeIdx:     resolveNodeIndex(nodeGetter, c.nodes, dstEp, dstAddr),
 	}
 }
 
-// resolveEndpointIndex resolves addr's Endpoint (if epGetter is set) and
-// returns its index in dedup, or nil if resolution isn't possible or fails.
-func resolveEndpointIndex(epGetter resolverTypes.EndpointGetter, dedup *EndpointDedup, addr netip.Addr) *uint32 {
+// resolveEndpoint resolves addr's Endpoint, or nil if epGetter is unset.
+func resolveEndpoint(epGetter resolverTypes.EndpointGetter, addr netip.Addr) *flowpb.Endpoint {
 	if epGetter == nil {
 		return nil
 	}
-	ep := epGetter.ResolveEndpoint(addr, 0, resolverTypes.DatapathContext{})
+	return epGetter.ResolveEndpoint(addr, 0, resolverTypes.DatapathContext{})
+}
+
+// dedupEndpointIndex records ep in dedup and returns its index, or nil if
+// ep is nil.
+func dedupEndpointIndex(dedup *EndpointDedup, ep *flowpb.Endpoint) *uint32 {
 	idx, ok := dedup.Index(ep)
+	if !ok {
+		return nil
+	}
+	return &idx
+}
+
+// resolveNodeIndex resolves addr's node (if nodeGetter is set) and returns
+// its index in dedup, or nil if resolution isn't possible or fails. Node
+// resolution is only attempted when ep did not resolve to a genuine local
+// endpoint (its ID is unset): otherwise the address is already fully
+// explained by the resolved Endpoint.
+func resolveNodeIndex(nodeGetter resolverTypes.NodeGetter, dedup *NodeDedup, ep *flowpb.Endpoint, addr netip.Addr) *uint32 {
+	if nodeGetter == nil || ep.GetID() != 0 {
+		return nil
+	}
+	n := nodeGetter.ResolveNode(addr)
+	idx, ok := dedup.Index(n)
 	if !ok {
 		return nil
 	}
@@ -202,11 +236,13 @@ type ctEntry struct {
 	flags                          uint8
 	value                          ctmap.StatsValue
 	srcEndpointIdx, dstEndpointIdx *uint32
+	srcNodeIdx, dstNodeIdx         *uint32
 }
 
 type ctStats struct {
 	entries    map[mergeKey]*ctEntry
 	endpoints  *EndpointDedup
+	nodes      *NodeDedup
 	computedAt time.Time
 }
 
@@ -232,6 +268,13 @@ func (c *ctStats) Endpoints() iter.Seq[*observerpb.ConntrackStatsEndpoint] {
 	return c.endpoints.Endpoints()
 }
 
+func (c *ctStats) Nodes() iter.Seq[*observerpb.ConntrackStatsNode] {
+	if c.nodes == nil {
+		return func(func(*observerpb.ConntrackStatsNode) bool) {}
+	}
+	return c.nodes.Nodes()
+}
+
 func CTEntryToProto(e *ctEntry) *observerpb.ConntrackStatsEntry {
 	return &observerpb.ConntrackStatsEntry{
 		Key: &observerpb.ConntrackStatsKey{
@@ -250,6 +293,8 @@ func CTEntryToProto(e *ctEntry) *observerpb.ConntrackStatsEntry {
 		},
 		SourceEndpointIndex:      Wrap(e.srcEndpointIdx),
 		DestinationEndpointIndex: Wrap(e.dstEndpointIdx),
+		SourceNodeIndex:          Wrap(e.srcNodeIdx),
+		DestinationNodeIndex:     Wrap(e.dstNodeIdx),
 	}
 }
 

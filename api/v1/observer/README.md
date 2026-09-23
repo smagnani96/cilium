@@ -7,6 +7,7 @@
     - [ConntrackStatsEndpoint](#observer-ConntrackStatsEndpoint)
     - [ConntrackStatsEntry](#observer-ConntrackStatsEntry)
     - [ConntrackStatsKey](#observer-ConntrackStatsKey)
+    - [ConntrackStatsNode](#observer-ConntrackStatsNode)
     - [ConntrackStatsValue](#observer-ConntrackStatsValue)
     - [ExportEvent](#observer-ExportEvent)
     - [GetAgentEventsRequest](#observer-GetAgentEventsRequest)
@@ -71,6 +72,8 @@ ConntrackStatsEntry is an entry from a node&#39;s datapath conntrack map.
 | value | [ConntrackStatsValue](#observer-ConntrackStatsValue) |  |  |
 | source_endpoint_index | [google.protobuf.UInt32Value](#google-protobuf-UInt32Value) |  | source_endpoint_index/destination_endpoint_index reference, by index, a ConntrackStatsEndpoint message carrying the resolved source/destination flow.Endpoint for this entry. They are unset if resolution failed. |
 | destination_endpoint_index | [google.protobuf.UInt32Value](#google-protobuf-UInt32Value) |  |  |
+| source_node_index | [google.protobuf.UInt32Value](#google-protobuf-UInt32Value) |  | source_node_index/destination_node_index reference, by index, a ConntrackStatsNode message carrying the resolved source/destination node for this entry. They are unset if resolution failed. |
+| destination_node_index | [google.protobuf.UInt32Value](#google-protobuf-UInt32Value) |  |  |
 
 
 
@@ -91,6 +94,26 @@ ConntrackStatsKey represents the key of a conntrack stats entry.
 | destination_port | [uint32](#uint32) |  |  |
 | protocol | [uint32](#uint32) |  |  |
 | flags | [uint32](#uint32) |  | flags is used only for internal purposes. TUPLE_F_SERVICE: will never appeared, as we&#39;re skipping CT_SERVICE direction in the datapath. TUPLE_F_IN: is ok as is, nothing special. TUPLE_F_OUT: is ok as is, nothing special. TUPLE_F_IN: is the exact copy of TUPLE_F_OUT but with reversed per-direction counters. We keep only one between the two. To do so, we must not lose this flag before aggregation. |
+
+
+
+
+
+
+<a name="observer-ConntrackStatsNode"></a>
+
+### ConntrackStatsNode
+ConntrackStatsNode carries a single resolved source or destination cluster
+node referenced by one or more ConntrackStatsEntry messages, alongside the
+index they reference it by.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| index | [uint32](#uint32) |  |  |
+| name | [string](#string) |  |  |
+| cluster | [string](#string) |  |  |
+| labels | [string](#string) | repeated |  |
 
 
 
@@ -189,8 +212,9 @@ GetAgentEventsResponse contains an event received from the Cilium agent.
 GetConntrackStatsResponse streams the entries themselves, or a status update
 about the node. A header is always sent before the entries it applies to.
 Every ConntrackStatsEndpoint referenced by an entry&#39;s source_endpoint_index or
-destination_endpoint_index is guaranteed to have been sent earlier in the
-same response stream.
+destination_endpoint_index, and every ConntrackStatsNode referenced by an
+entry&#39;s source_node_index or destination_node_index, is guaranteed to have
+been sent earlier in the same response stream.
 
 
 | Field | Type | Label | Description |
@@ -198,6 +222,7 @@ same response stream.
 | entry | [ConntrackStatsEntry](#observer-ConntrackStatsEntry) |  |  |
 | node_status | [relay.NodeStatusEvent](#relay-NodeStatusEvent) |  |  |
 | endpoint | [ConntrackStatsEndpoint](#observer-ConntrackStatsEndpoint) |  |  |
+| node | [ConntrackStatsNode](#observer-ConntrackStatsNode) |  |  |
 
 
 

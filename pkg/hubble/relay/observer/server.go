@@ -258,10 +258,18 @@ func (s *Server) GetConntrackStats(req *observerpb.GetConntrackStatsRequest, str
 		return err
 	}
 
-	// Endpoints are sent before the entries that reference them by index.
+	// Endpoints and nodes are sent before the entries that reference them by index.
 	for ep := range stats.Endpoints() {
 		if err := stream.Send(&observerpb.GetConntrackStatsResponse{
 			ResponseTypes: &observerpb.GetConntrackStatsResponse_Endpoint{Endpoint: ep},
+		}); err != nil {
+			return err
+		}
+	}
+
+	for n := range stats.Nodes() {
+		if err := stream.Send(&observerpb.GetConntrackStatsResponse{
+			ResponseTypes: &observerpb.GetConntrackStatsResponse_Node{Node: n},
 		}); err != nil {
 			return err
 		}

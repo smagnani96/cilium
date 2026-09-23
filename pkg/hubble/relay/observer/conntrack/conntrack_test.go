@@ -30,7 +30,7 @@ func TestAggregateGlobalCtEntry(t *testing.T) {
 			Protocol:        6,
 		},
 		Value: &observerpb.ConntrackStatsValue{RxPackets: 20, RxBytes: 0},
-	}, nil, nil, dedup)
+	}, nil, nil, nil, nil, dedup, nil)
 
 	// A distinct connection (different destination port) must not be merged
 	// into the one above.
@@ -42,7 +42,7 @@ func TestAggregateGlobalCtEntry(t *testing.T) {
 			Protocol:        6,
 		},
 		Value: &observerpb.ConntrackStatsValue{RxPackets: 1, RxBytes: 1},
-	}, nil, nil, dedup)
+	}, nil, nil, nil, nil, dedup, nil)
 
 	require.Len(t, entries, 2)
 
@@ -74,7 +74,7 @@ func TestAggregateGlobalCtEntry_SameConnection(t *testing.T) {
 	aggregateCtEntry(entries, &observerpb.ConntrackStatsEntry{
 		Key:   key,
 		Value: &observerpb.ConntrackStatsValue{RxPackets: 5, RxBytes: 100},
-	}, nil, nil, dedup)
+	}, nil, nil, nil, nil, dedup, nil)
 
 	// The same connection observed from node "b", with a distinct
 	// *ConntrackStatsKey instance (as would happen across two peer responses)
@@ -87,7 +87,7 @@ func TestAggregateGlobalCtEntry_SameConnection(t *testing.T) {
 			Protocol:        6,
 		},
 		Value: &observerpb.ConntrackStatsValue{RxPackets: 10, RxBytes: 50},
-	}, nil, nil, dedup)
+	}, nil, nil, nil, nil, dedup, nil)
 
 	require.Len(t, entries, 1)
 
@@ -117,7 +117,7 @@ func TestAggregateGlobalCtEntry_InOutMirror(t *testing.T) {
 			Flags:           0, // TUPLE_F_OUT
 		},
 		Value: &observerpb.ConntrackStatsValue{RxPackets: 1, RxBytes: 205, TxPackets: 1, TxBytes: 112},
-	}, nil, nil, dedup)
+	}, nil, nil, nil, nil, dedup, nil)
 
 	// Receiving endpoint's node reports the TUPLE_F_IN mirror: RX/TX swapped.
 	aggregateCtEntry(entries, &observerpb.ConntrackStatsEntry{
@@ -130,7 +130,7 @@ func TestAggregateGlobalCtEntry_InOutMirror(t *testing.T) {
 			Flags:           1, // TUPLE_F_IN
 		},
 		Value: &observerpb.ConntrackStatsValue{RxPackets: 1, RxBytes: 112, TxPackets: 1, TxBytes: 205},
-	}, nil, nil, dedup)
+	}, nil, nil, nil, nil, dedup, nil)
 
 	require.Len(t, entries, 1)
 
@@ -160,7 +160,7 @@ func TestAggregateGlobalCtEntry_InOutMirror_ReverseOrder(t *testing.T) {
 			Flags:           1, // TUPLE_F_IN
 		},
 		Value: &observerpb.ConntrackStatsValue{RxPackets: 1, RxBytes: 112, TxPackets: 1, TxBytes: 205},
-	}, nil, nil, dedup)
+	}, nil, nil, nil, nil, dedup, nil)
 
 	aggregateCtEntry(entries, &observerpb.ConntrackStatsEntry{
 		Key: &observerpb.ConntrackStatsKey{
@@ -172,7 +172,7 @@ func TestAggregateGlobalCtEntry_InOutMirror_ReverseOrder(t *testing.T) {
 			Flags:           0, // TUPLE_F_OUT
 		},
 		Value: &observerpb.ConntrackStatsValue{RxPackets: 1, RxBytes: 205, TxPackets: 1, TxBytes: 112},
-	}, nil, nil, dedup)
+	}, nil, nil, nil, nil, dedup, nil)
 
 	require.Len(t, entries, 1)
 
@@ -280,5 +280,53 @@ func TestMergeConntrackResponses_DedupsEndpointsAcrossPeers(t *testing.T) {
 	for _, v := range stats.entries {
 		require.NotNil(t, v.dstEndpointIdx)
 		require.EqualValues(t, 0, *v.dstEndpointIdx)
+	}
+}
+
+func TestMergeConntrackResponses_DedupsEndpointsAcrossPeersDespiteIDChurn(t *testing.T) {
+	local := &flowpb.Endpoint{ID: 576, Identity: 30003, Namespace: "cilium-test-1", PodName: "client-657b75749d-q444l", PodUid: "ffa86fd4-0386-422c-baeb-6e82b9985e78"}
+	remote := &flowpb.Endpoint{Identity: 30003, Namespace: "cilium-test-1", PodName: "client-657b75749d-q444l", PodUid: "ffa86fd4-0386-422c-baeb-6e82b9985e78"}
+
+	responses := make(chan *PeerResponse, 4)
+	responses <- &PeerResponse{Peer: "node-a", Response: &observerpb.GetConntrackStatsResponse{
+		ResponseTypes: &observerpb.GetConntrackStatsResponse_Endpoint{
+			Endpoint: &observerpb.ConntrackStatsEndpoint{Index: 0, Endpoint: local},
+		},
+	}}
+	responses <- &PeerResponse{Peer: "node-a", Response: &observerpb.GetConntrackStatsResponse{
+		ResponseTypes: &observerpb.GetConntrackStatsResponse_Entry{
+			Entry: &observerpb.ConntrackStatsEntry{
+				Key:                 &observerpb.ConntrackStatsKey{SourceIp: "10.0.0.1", DestinationIp: "10.0.0.9", DestinationPort: 80, Protocol: 6},
+				Value:               &observerpb.ConntrackStatsValue{RxPackets: 25},
+				SourceEndpointIndex: wrapperspb.UInt32(0),
+			},
+		},
+	}}
+	responses <- &PeerResponse{Peer: "node-b", Response: &observerpb.GetConntrackStatsResponse{
+		ResponseTypes: &observerpb.GetConntrackStatsResponse_Endpoint{
+			Endpoint: &observerpb.ConntrackStatsEndpoint{Index: 0, Endpoint: remote},
+		},
+	}}
+	responses <- &PeerResponse{Peer: "node-b", Response: &observerpb.GetConntrackStatsResponse{
+		ResponseTypes: &observerpb.GetConntrackStatsResponse_Entry{
+			Entry: &observerpb.ConntrackStatsEntry{
+				Key:                 &observerpb.ConntrackStatsKey{SourceIp: "10.0.0.1", DestinationIp: "10.0.0.10", DestinationPort: 443, Protocol: 6},
+				Value:               &observerpb.ConntrackStatsValue{RxPackets: 5},
+				SourceEndpointIndex: wrapperspb.UInt32(0),
+			},
+		},
+	}}
+	close(responses)
+
+	stats := mergeConntrackResponses(responses)
+	require.Len(t, stats.entries, 2)
+	require.Empty(t, stats.nodeStatuses)
+
+	got := stats.endpoints.List()
+	require.Len(t, got, 1)
+
+	for _, v := range stats.entries {
+		require.NotNil(t, v.srcEndpointIdx)
+		require.EqualValues(t, 0, *v.srcEndpointIdx)
 	}
 }

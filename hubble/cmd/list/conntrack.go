@@ -71,7 +71,9 @@ func runListCTStats(ctx context.Context, cmd *cobra.Command, conn *grpc.ClientCo
 	}
 
 	endpoints := make(map[uint32]*flowpb.Endpoint)
+	nodes := make(map[uint32]*observerpb.ConntrackStatsNode)
 	var endpointList []*observerpb.ConntrackStatsEndpoint
+	var nodeList []*observerpb.ConntrackStatsNode
 	var entries []*observerpb.ConntrackStatsEntry
 	for {
 		resp, err := stream.Recv()
@@ -90,6 +92,11 @@ func runListCTStats(ctx context.Context, cmd *cobra.Command, conn *grpc.ClientCo
 			endpointList = append(endpointList, ep)
 			continue
 		}
+		if n := resp.GetNode(); n != nil {
+			nodes[n.GetIndex()] = n
+			nodeList = append(nodeList, n)
+			continue
+		}
 		e := resp.GetEntry()
 		if e == nil {
 			continue
@@ -104,9 +111,9 @@ func runListCTStats(ctx context.Context, cmd *cobra.Command, conn *grpc.ClientCo
 
 	switch listOpts.output {
 	case "json":
-		return jsonOutput(cmd.OutOrStdout(), &conntrackJSONOutput{Endpoints: endpointList, Entries: entries})
+		return jsonOutput(cmd.OutOrStdout(), &conntrackJSONOutput{Endpoints: endpointList, Nodes: nodeList, Entries: entries})
 	case "table":
-		return conntrackTableOutput(cmd.OutOrStdout(), entries, endpoints)
+		return conntrackTableOutput(cmd.OutOrStdout(), entries, endpoints, nodes)
 	default:
 		return fmt.Errorf("unknown output format: %s", listOpts.output)
 	}
@@ -115,17 +122,18 @@ func runListCTStats(ctx context.Context, cmd *cobra.Command, conn *grpc.ClientCo
 // conntrackJSONOutput is the JSON representation of a GetConntrackStats dump
 type conntrackJSONOutput struct {
 	Endpoints []*observerpb.ConntrackStatsEndpoint `json:"endpoints,omitempty"`
+	Nodes     []*observerpb.ConntrackStatsNode     `json:"nodes,omitempty"`
 	Entries   []*observerpb.ConntrackStatsEntry    `json:"entries"`
 }
 
-func conntrackTableOutput(buf io.Writer, entries []*observerpb.ConntrackStatsEntry, endpoints map[uint32]*flowpb.Endpoint) error {
+func conntrackTableOutput(buf io.Writer, entries []*observerpb.ConntrackStatsEntry, endpoints map[uint32]*flowpb.Endpoint, nodes map[uint32]*observerpb.ConntrackStatsNode) error {
 	tw := tabwriter.NewWriter(buf, 2, 0, 3, ' ', 0)
 	fmt.Fprint(tw, "SOURCE\tDESTINATION\tPROTO\tRX PACKETS\tTX PACKETS\tRX BYTES\tTX BYTES")
 	fmt.Fprintln(tw)
 	for _, v := range sortedEntries(entries) {
 		fmt.Fprint(tw,
-			formatAddr(v.GetKey().GetSourceIp(), v.GetKey().GetSourcePort(), resolveEndpoint(v.GetSourceEndpointIndex(), endpoints)), "\t",
-			formatAddr(v.GetKey().GetDestinationIp(), v.GetKey().GetDestinationPort(), resolveEndpoint(v.GetDestinationEndpointIndex(), endpoints)), "\t",
+			formatAddr(v.GetKey().GetSourceIp(), v.GetKey().GetSourcePort(), resolveEndpoint(v.GetSourceEndpointIndex(), endpoints), resolveNode(v.GetSourceNodeIndex(), nodes)), "\t",
+			formatAddr(v.GetKey().GetDestinationIp(), v.GetKey().GetDestinationPort(), resolveEndpoint(v.GetDestinationEndpointIndex(), endpoints), resolveNode(v.GetDestinationNodeIndex(), nodes)), "\t",
 			conntrackProtocolName(v.GetKey().GetProtocol()), "\t",
 			v.GetValue().GetRxPackets(), "\t",
 			v.GetValue().GetTxPackets(), "\t",
@@ -141,9 +149,11 @@ func conntrackTableOutput(buf io.Writer, entries []*observerpb.ConntrackStatsEnt
 }
 
 // formatAddr formats an IP address and port, optionally including the resolved data.
-func formatAddr(ip string, port uint32, ep *flowpb.Endpoint) string {
+func formatAddr(ip string, port uint32, ep *flowpb.Endpoint, node *observerpb.ConntrackStatsNode) string {
 	ret := fmt.Sprintf("%s:%d", ip, port)
-	if ep != nil {
+	if node != nil {
+		ret += " (" + formatNode(node) + ")"
+	} else if ep != nil {
 		ret += " (" + formatEndpoint(ep) + ")"
 	}
 	return ret
@@ -157,6 +167,16 @@ func resolveEndpoint(idx *wrapperspb.UInt32Value, endpoints map[uint32]*flowpb.E
 		return nil
 	}
 	return endpoints[idx.GetValue()]
+}
+
+// resolveNode looks up idx (if set) in nodes. A nil idx means the server
+// didn't resolve this side of the entry to a node, and must not be
+// confused with a resolved index of 0.
+func resolveNode(idx *wrapperspb.UInt32Value, nodes map[uint32]*observerpb.ConntrackStatsNode) *observerpb.ConntrackStatsNode {
+	if idx == nil {
+		return nil
+	}
+	return nodes[idx.GetValue()]
 }
 
 // formatEndpoint renders ep the same way "hubble observe" renders a flow
@@ -176,6 +196,16 @@ func formatEndpoint(ep *flowpb.Endpoint) string {
 		return fmt.Sprintf("ID:%d", id)
 	}
 	return ""
+}
+
+// formatNode renders node as "node/<name>", or "<cluster>/node/<name>" if
+// it belongs to a non-local cluster. Returns "" if node is nil, i.e.
+// resolution failed or wasn't attempted.
+func formatNode(node *observerpb.ConntrackStatsNode) string {
+	if cluster := node.GetCluster(); cluster != "" {
+		return fmt.Sprintf("%s/node/%s", cluster, node.GetName())
+	}
+	return fmt.Sprintf("node/%s", node.GetName())
 }
 
 // conntrackProtocolName returns the protocol name for a given protocol number

@@ -458,6 +458,26 @@ var NoopServiceGetter = FakeServiceGetter{
 	},
 }
 
+// FakeNodeGetter is used for unit tests that need NodeGetter.
+type FakeNodeGetter struct {
+	OnResolveNode func(ip netip.Addr) *resolverTypes.ResolvedNode
+}
+
+// ResolveNode implements FakeNodeGetter.ResolveNode.
+func (f *FakeNodeGetter) ResolveNode(ip netip.Addr) *resolverTypes.ResolvedNode {
+	if f.OnResolveNode != nil {
+		return f.OnResolveNode(ip)
+	}
+	panic("OnResolveNode not set")
+}
+
+// NoopNodeGetter always returns an empty response.
+var NoopNodeGetter = FakeNodeGetter{
+	OnResolveNode: func(ip netip.Addr) *resolverTypes.ResolvedNode {
+		return nil
+	},
+}
+
 // FakeIdentityGetter is used for unit tests that need IdentityGetter.
 type FakeIdentityGetter struct {
 	OnGetIdentity func(securityIdentity uint32) (*identity.Identity, error)
