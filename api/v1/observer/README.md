@@ -4,9 +4,14 @@
 ## Table of Contents
 
 - [observer/observer.proto](#observer_observer-proto)
+    - [ConntrackStatsEntry](#observer-ConntrackStatsEntry)
+    - [ConntrackStatsKey](#observer-ConntrackStatsKey)
+    - [ConntrackStatsValue](#observer-ConntrackStatsValue)
     - [ExportEvent](#observer-ExportEvent)
     - [GetAgentEventsRequest](#observer-GetAgentEventsRequest)
     - [GetAgentEventsResponse](#observer-GetAgentEventsResponse)
+    - [GetConntrackStatsRequest](#observer-GetConntrackStatsRequest)
+    - [GetConntrackStatsResponse](#observer-GetConntrackStatsResponse)
     - [GetDebugEventsRequest](#observer-GetDebugEventsRequest)
     - [GetDebugEventsResponse](#observer-GetDebugEventsResponse)
     - [GetFlowsRequest](#observer-GetFlowsRequest)
@@ -32,6 +37,60 @@
 <p align="right"><a href="#top">Top</a></p>
 
 ## observer/observer.proto
+
+
+
+<a name="observer-ConntrackStatsEntry"></a>
+
+### ConntrackStatsEntry
+ConntrackStatsEntry is an entry from a node&#39;s datapath conntrack map.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| key | [ConntrackStatsKey](#observer-ConntrackStatsKey) |  |  |
+| value | [ConntrackStatsValue](#observer-ConntrackStatsValue) |  |  |
+
+
+
+
+
+
+<a name="observer-ConntrackStatsKey"></a>
+
+### ConntrackStatsKey
+ConntrackStatsKey represents the key of a conntrack stats entry.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| source_ip | [string](#string) |  |  |
+| source_port | [uint32](#uint32) |  |  |
+| destination_ip | [string](#string) |  |  |
+| destination_port | [uint32](#uint32) |  |  |
+| protocol | [uint32](#uint32) |  |  |
+| flags | [uint32](#uint32) |  | flags is used only for internal purposes. TUPLE_F_SERVICE: will never appeared, as we&#39;re skipping CT_SERVICE direction in the datapath. TUPLE_F_IN: is ok as is, nothing special. TUPLE_F_OUT: is ok as is, nothing special. TUPLE_F_IN: is the exact copy of TUPLE_F_OUT but with reversed per-direction counters. We keep only one between the two. To do so, we must not lose this flag before aggregation. |
+
+
+
+
+
+
+<a name="observer-ConntrackStatsValue"></a>
+
+### ConntrackStatsValue
+ConntrackStatsValue represents the value of a conntrack stats entry.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| rx_packets | [uint64](#uint64) |  |  |
+| tx_packets | [uint64](#uint64) |  |  |
+| rx_bytes | [uint64](#uint64) |  |  |
+| tx_bytes | [uint64](#uint64) |  |  |
+
+
+
 
 
 
@@ -87,6 +146,33 @@ GetAgentEventsResponse contains an event received from the Cilium agent.
 | agent_event | [flow.AgentEvent](#flow-AgentEvent) |  |  |
 | node_name | [string](#string) |  | Name of the node where this event was observed. |
 | time | [google.protobuf.Timestamp](#google-protobuf-Timestamp) |  | Timestamp at which this event was observed. |
+
+
+
+
+
+
+<a name="observer-GetConntrackStatsRequest"></a>
+
+### GetConntrackStatsRequest
+
+
+
+
+
+
+
+<a name="observer-GetConntrackStatsResponse"></a>
+
+### GetConntrackStatsResponse
+GetConntrackStatsResponse streams the entries themselves, or a status update
+about the node. A header is always sent before the entries it applies to.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| entry | [ConntrackStatsEntry](#observer-ConntrackStatsEntry) |  |  |
+| node_status | [relay.NodeStatusEvent](#relay-NodeStatusEvent) |  |  |
 
 
 
@@ -341,6 +427,7 @@ to observe.
 | GetNodes | [GetNodesRequest](#observer-GetNodesRequest) | [GetNodesResponse](#observer-GetNodesResponse) | GetNodes returns information about nodes in a cluster. |
 | GetNamespaces | [GetNamespacesRequest](#observer-GetNamespacesRequest) | [GetNamespacesResponse](#observer-GetNamespacesResponse) | GetNamespaces returns information about namespaces in a cluster. The namespaces returned are namespaces which have had network flows in the last hour. The namespaces are returned sorted by cluster name and namespace in ascending order. |
 | ServerStatus | [ServerStatusRequest](#observer-ServerStatusRequest) | [ServerStatusResponse](#observer-ServerStatusResponse) | ServerStatus returns some details about the running hubble server. |
+| GetConntrackStats | [GetConntrackStatsRequest](#observer-GetConntrackStatsRequest) | [GetConntrackStatsResponse](#observer-GetConntrackStatsResponse) stream | GetConntrackStats returns the connection tracking stats currently present in the node&#39;s datapath conntrack maps. Because the underlying maps are LRU-based, the result is a best-effort snapshot: entries may be evicted or added while it is being produced. |
 
  
 

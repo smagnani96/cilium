@@ -19,6 +19,8 @@ import (
 	exportercell "github.com/cilium/cilium/pkg/hubble/exporter/cell"
 	"github.com/cilium/cilium/pkg/hubble/metrics"
 	metricscell "github.com/cilium/cilium/pkg/hubble/metrics/cell"
+	"github.com/cilium/cilium/pkg/hubble/observer/conntrack"
+	ctTypes "github.com/cilium/cilium/pkg/hubble/observer/conntrack/types"
 	"github.com/cilium/cilium/pkg/hubble/observer/namespace"
 	"github.com/cilium/cilium/pkg/hubble/observer/observeroption"
 	"github.com/cilium/cilium/pkg/hubble/parser"
@@ -49,6 +51,9 @@ var Cell = cell.Module(
 
 	// Hubble flow log exporters
 	exportercell.Cell,
+
+	// On-demand dumps of conntrack maps snapshots
+	conntrack.Cell,
 
 	// Metrics server and flow processor
 	metricscell.Cell,
@@ -91,6 +96,8 @@ type hubbleParams struct {
 	NodeLocalStore    *node.LocalNodeStore
 	MonitorAgent      monitorAgent.Agent
 
+	CTStatsExporter ctTypes.CTStatsExporter
+
 	TLSConfigPromise tlsConfigPromise
 
 	// NOTE: ordering is not guaranteed, do not rely on it.
@@ -124,6 +131,7 @@ func newHubbleIntegration(params hubbleParams) (HubbleIntegration, error) {
 		params.NodeLocalStore,
 		params.MonitorAgent,
 		params.TLSConfigPromise,
+		params.CTStatsExporter,
 		params.ObserverOptions,
 		params.ExporterBuilders,
 		params.DropEventEmitter,

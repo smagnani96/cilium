@@ -37,6 +37,12 @@ service Observer {
 
     // ServerStatus returns some details about the running hubble server.
     rpc ServerStatus(ServerStatusRequest) returns (ServerStatusResponse) {}
+
+    // GetConntrackStats returns the connection tracking stats currently
+    // present in the node's datapath conntrack maps. Because the underlying
+    // maps are LRU-based, the result is a best-effort snapshot: entries may
+    // be evicted or added while it is being produced.
+    rpc GetConntrackStats(GetConntrackStatsRequest) returns (stream GetConntrackStatsResponse) {}
 }
 
 message ServerStatusRequest {}
@@ -276,6 +282,50 @@ message GetNamespacesResponse {
 message Namespace {
   string cluster = 1;
   string namespace = 2;
+}
+
+message GetConntrackStatsRequest {
+}
+
+// GetConntrackStatsResponse streams the entries themselves, or a status update
+// about the node. A header is always sent before the entries it applies to.
+message GetConntrackStatsResponse {
+    oneof response_types {
+        ConntrackStatsEntry entry = 1;
+        relay.NodeStatusEvent node_status = 2;
+    }
+}
+
+// ConntrackStatsKey represents the key of a conntrack stats entry.
+message ConntrackStatsKey {
+    string source_ip = 1;
+    uint32 source_port = 2;
+    string destination_ip = 3;
+    uint32 destination_port = 4;
+    uint32 protocol = 5;
+    // flags is used only for internal purposes.
+    // TUPLE_F_SERVICE: will never appeared, as we're skipping CT_SERVICE
+    // direction in the datapath.
+    // TUPLE_F_IN: is ok as is, nothing special.
+    // TUPLE_F_OUT: is ok as is, nothing special.
+    // TUPLE_F_IN: is the exact copy of TUPLE_F_OUT but with reversed
+    // per-direction counters. We keep only one between the two. To do so,
+    // we must not lose this flag before aggregation.
+    uint32 flags = 6;
+}
+
+// ConntrackStatsValue represents the value of a conntrack stats entry.
+message ConntrackStatsValue {
+    uint64 rx_packets = 1;
+    uint64 tx_packets = 2;
+    uint64 rx_bytes = 3;
+    uint64 tx_bytes = 4;
+}
+
+// ConntrackStatsEntry is an entry from a node's datapath conntrack map.
+message ConntrackStatsEntry {
+    ConntrackStatsKey key = 1;
+    ConntrackStatsValue value = 2;
 }
 
 // ExportEvent contains an event to be exported. Not to be used outside of the

@@ -4,6 +4,7 @@
 package ctmap
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"slices"
@@ -138,10 +139,11 @@ func newCTStatsMaps(in struct {
 		in.BpfCTStatsMapMax = option.LimitTableMax
 	}
 
-	var maps statsMaps
+	var maps = &statsMaps{}
 	var maxStatsEntries int
 	if in.DaemonConfig.IPv4Enabled() && in.DaemonConfig.BPFConntrackAccounting {
 		maps.v4StatsMap, maxStatsEntries = newStatsMap(mapTypeStats4, in.BpfCTStatsMapMax, in.Log)
+		maps.maxStatsEntries = maxStatsEntries
 		if int(maxStatsEntries) != in.BpfCTStatsMapMax {
 			in.Log.Debug("Rounded ct stats v4 map size down to the closest multiple of the number of possible CPUs",
 				logfields.Entries, maxStatsEntries)
@@ -150,15 +152,15 @@ func newCTStatsMaps(in struct {
 
 	if in.DaemonConfig.IPv6Enabled() && in.DaemonConfig.BPFConntrackAccounting {
 		maps.v6StatsMap, maxStatsEntries = newStatsMap(mapTypeStats6, in.BpfCTStatsMapMax, in.Log)
+		maps.maxStatsEntries = maxStatsEntries
 		if int(maxStatsEntries) != in.BpfCTStatsMapMax {
 			in.Log.Debug("Rounded ct stats v6 map size down to the closest multiple of the number of possible CPUs",
 				logfields.Entries, maxStatsEntries)
 		}
 	}
-	maps.maxStatsEntries = maxStatsEntries
 
 	out.NodeDefines = map[string]string{
-		"CT_STATS_MAP_SIZE": fmt.Sprint(in.BpfCTStatsMapMax),
+		"CT_STATS_MAP_SIZE": fmt.Sprint(maxStatsEntries),
 	}
 
 	in.Lifecycle.Append(cell.Hook{
@@ -170,12 +172,13 @@ func newCTStatsMaps(in struct {
 		},
 	})
 
-	out.MapOut = bpf.NewMapOut(StatsMaps(&maps))
+	out.MapOut = bpf.NewMapOut(StatsMaps(maps))
 	return
 }
 
 type StatsMaps interface {
 	MaxEntries() int
+	DumpEntries(ctx context.Context, cb func(CtKey, StatsValues) bool) error
 }
 
 type statsMaps struct {
@@ -187,6 +190,18 @@ type statsMaps struct {
 
 func (s *statsMaps) MaxEntries() int {
 	return s.maxStatsEntries
+}
+
+func (s *statsMaps) DumpEntries(ctx context.Context, cb func(CtKey, StatsValues) bool) error {
+	for _, m := range []*StatsMap{s.v4StatsMap, s.v6StatsMap} {
+		if m == nil {
+			continue
+		}
+		if err := m.DumpEntries(ctx, cb); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *statsMaps) init() error {

@@ -4,6 +4,7 @@
 package ctmap
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"unsafe"
@@ -165,4 +166,27 @@ func (m statsMapType) key() bpf.MapKey {
 
 func (m statsMapType) value() bpf.MapValue {
 	return &StatsValue{}
+}
+
+// DumpEntries walks the datapath conntrack stats maps and invokes the callback for each entry.
+func (m *StatsMap) DumpEntries(ctx context.Context, cb func(CtKey, StatsValues) bool) error {
+	switch m.mapType {
+	case mapTypeStats4:
+		return iteratePerCPU(ctx, m.Map, func(k *CtKey4Global, v []StatsValue) bool { return cb(k, v) })
+	case mapTypeStats6:
+		return iteratePerCPU(ctx, m.Map, func(k *CtKey6Global, v []StatsValue) bool { return cb(k, v) })
+	default:
+		panic("Unexpected map type " + m.mapType.String())
+	}
+}
+
+// iteratePerCPU is the per-CPU equivalent of iterate: it yields one []VT for every key.
+func iteratePerCPU[KT any, VT any, KP bpf.KeyPointer[KT]](ctx context.Context, m *bpf.Map, filterCallback func(key KP, value []VT) bool) error {
+	iter := bpf.NewPerCPUBatchIterator[KT, VT, KP](m)
+	for k, v := range iter.IterateAll(ctx) {
+		if !filterCallback(k, v) {
+			break
+		}
+	}
+	return iter.Err()
 }

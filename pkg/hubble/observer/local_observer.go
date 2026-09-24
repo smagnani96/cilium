@@ -23,6 +23,7 @@ import (
 	"github.com/cilium/cilium/pkg/hubble/build"
 	"github.com/cilium/cilium/pkg/hubble/container"
 	"github.com/cilium/cilium/pkg/hubble/filters"
+	ctTypes "github.com/cilium/cilium/pkg/hubble/observer/conntrack/types"
 	"github.com/cilium/cilium/pkg/hubble/observer/namespace"
 	"github.com/cilium/cilium/pkg/hubble/observer/observeroption"
 	observerTypes "github.com/cilium/cilium/pkg/hubble/observer/types"
@@ -67,12 +68,15 @@ type LocalObserverServer struct {
 	numObservedFlows atomic.Uint64
 
 	nsManager namespace.Manager
+
+	ctStatsExporter ctTypes.CTStatsExporter
 }
 
 // NewLocalServer returns a new local observer server.
 func NewLocalServer(
 	payloadParser parser.Decoder,
 	nsManager namespace.Manager,
+	ctStatsExporter ctTypes.CTStatsExporter,
 	logger *slog.Logger,
 	options ...observeroption.Option,
 ) (*LocalObserverServer, error) {
@@ -91,14 +95,15 @@ func NewLocalServer(
 	)
 
 	s := &LocalObserverServer{
-		log:           logger,
-		ring:          container.NewRing(opts.MaxFlows),
-		events:        make(chan *observerTypes.MonitorEvent, opts.MonitorBuffer),
-		stopped:       make(chan struct{}),
-		payloadParser: payloadParser,
-		startTime:     time.Now(),
-		nsManager:     nsManager,
-		opts:          opts,
+		log:             logger,
+		ring:            container.NewRing(opts.MaxFlows),
+		events:          make(chan *observerTypes.MonitorEvent, opts.MonitorBuffer),
+		stopped:         make(chan struct{}),
+		payloadParser:   payloadParser,
+		startTime:       time.Now(),
+		nsManager:       nsManager,
+		ctStatsExporter: ctStatsExporter,
+		opts:            opts,
 	}
 
 	for _, f := range s.opts.OnServerInit {
@@ -254,6 +259,35 @@ func (s *LocalObserverServer) GetNodes(ctx context.Context, req *observerpb.GetN
 // GetNamespaces implements observerpb.ObserverClient.GetNamespaces.
 func (s *LocalObserverServer) GetNamespaces(ctx context.Context, req *observerpb.GetNamespacesRequest) (*observerpb.GetNamespacesResponse, error) {
 	return &observerpb.GetNamespacesResponse{Namespaces: s.nsManager.GetNamespaces()}, nil
+}
+
+// GetConntrackStats implements observerpb.ObserverServer.GetConntrackStats.
+func (s *LocalObserverServer) GetConntrackStats(
+	req *observerpb.GetConntrackStatsRequest,
+	server observerpb.Observer_GetConntrackStatsServer,
+) error {
+	ctx := server.Context()
+
+	if !s.ctStatsExporter.Enabled() {
+		return status.Errorf(codes.Unavailable, "Conntrack stats not enabled")
+	}
+
+	snap, err := s.ctStatsExporter.GetConntrackStats(ctx)
+	if err != nil {
+		return err
+	}
+
+	for e := range snap.Entries() {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := server.Send(&observerpb.GetConntrackStatsResponse{
+			ResponseTypes: &observerpb.GetConntrackStatsResponse_Entry{Entry: e}}); err != nil {
+			return err
+		}
+	}
+
+	return ctx.Err()
 }
 
 // GetFlows implements the proto method for client requests.
