@@ -328,6 +328,10 @@
      - Configure the maximum number of entries for the non-TCP connection tracking table.
      - int
      - ``262144``
+   * - :spelling:ignore:`bpf.ctStatsMax`
+     - Configure the maximum number of entries in the connection tracking stats map table.
+     - int
+     - ``65536``
    * - :spelling:ignore:`bpf.ctTcpMax`
      - Configure the maximum number of entries in the TCP connection tracking table.
      - int

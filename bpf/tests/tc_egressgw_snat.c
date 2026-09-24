@@ -101,7 +101,7 @@ int egressgw_snat1_check(const struct __ctx_buff *ctx)
 {
 	return egressgw_snat_check(ctx, (struct egressgw_test_ctx) {
 			.test = TEST_SNAT1,
-			.packets = 1,
+			.tx_packets = 1,
 			.status_code = CTX_ACT_OK
 		});
 }
@@ -133,7 +133,8 @@ int egressgw_snat1_2_reply_check(const struct __ctx_buff *ctx)
 	return egressgw_snat_check(ctx, (struct egressgw_test_ctx) {
 			.test = TEST_SNAT1,
 			.dir = CT_INGRESS,
-			.packets = 2,
+			.rx_packets = 1,
+			.tx_packets = 1,
 			.status_code = CTX_ACT_REDIRECT,
 		});
 }
@@ -159,7 +160,7 @@ int egressgw_snat2_check(struct __ctx_buff *ctx)
 {
 	int ret = egressgw_snat_check(ctx, (struct egressgw_test_ctx) {
 			.test = TEST_SNAT2,
-			.packets = 1,
+			.tx_packets = 1,
 			.status_code = CTX_ACT_OK
 		});
 
@@ -197,7 +198,7 @@ int egressgw_tuple_collision1_check(const struct __ctx_buff *ctx)
 {
 	int ret = egressgw_snat_check(ctx, (struct egressgw_test_ctx) {
 			.test = TEST_SNAT_TUPLE_COLLISION,
-			.packets = 1,
+			.tx_packets = 1,
 			.status_code = CTX_ACT_OK
 		});
 
@@ -232,7 +233,7 @@ int egressgw_tuple_collision2_check(const struct __ctx_buff *ctx)
 	return egressgw_snat_check(ctx, (struct egressgw_test_ctx) {
 			.test = TEST_SNAT_TUPLE_COLLISION,
 			.tuple_collision = true,
-			.packets = 2,
+			.tx_packets = 2,
 			.status_code = CTX_ACT_OK
 		});
 }
@@ -266,7 +267,8 @@ int egressgw_tuple_collision2_reply_check(const struct __ctx_buff *ctx)
 	int ret = egressgw_snat_check(ctx, (struct egressgw_test_ctx) {
 			.test = TEST_SNAT_TUPLE_COLLISION,
 			.dir = CT_INGRESS,
-			.packets = 3,
+			.tx_packets = 2,
+			.rx_packets = 1,
 			.status_code = CTX_ACT_REDIRECT,
 		});
 
@@ -389,7 +391,7 @@ int egressgw_snat1_check_v6(const struct __ctx_buff *ctx)
 {
 	return egressgw_snat_check_v6(ctx, (struct egressgw_test_ctx) {
 			.test = TEST_SNAT1,
-			.packets = 1,
+			.tx_packets = 1,
 			.status_code = CTX_ACT_OK
 		});
 }
@@ -423,7 +425,8 @@ int egressgw_snat1_2_reply_check_v6(const struct __ctx_buff *ctx)
 	return egressgw_snat_check_v6(ctx, (struct egressgw_test_ctx) {
 			.test = TEST_SNAT1,
 			.dir = CT_INGRESS,
-			.packets = 2,
+			.rx_packets = 1,
+			.tx_packets = 1,
 			.status_code = CTX_ACT_REDIRECT,
 		});
 }
@@ -452,7 +455,7 @@ int egressgw_snat2_check_v6(struct __ctx_buff *ctx)
 
 	int ret = egressgw_snat_check_v6(ctx, (struct egressgw_test_ctx) {
 			.test = TEST_SNAT2,
-			.packets = 1,
+			.tx_packets = 1,
 			.status_code = CTX_ACT_OK
 		});
 
@@ -497,7 +500,7 @@ int egressgw_tuple_collision1_check_v6(const struct __ctx_buff *ctx)
 
 	int ret = egressgw_snat_check_v6(ctx, (struct egressgw_test_ctx) {
 			.test = TEST_SNAT_TUPLE_COLLISION,
-			.packets = 1,
+			.tx_packets = 1,
 			.status_code = CTX_ACT_OK
 		});
 
@@ -536,7 +539,8 @@ int egressgw_tuple_collision2_check_v6(const struct __ctx_buff *ctx)
 	return egressgw_snat_check_v6(ctx, (struct egressgw_test_ctx) {
 			.test = TEST_SNAT_TUPLE_COLLISION,
 			.tuple_collision = true,
-			.packets = 2,
+			.rx_packets = 1,
+			.tx_packets = 1,
 			.status_code = CTX_ACT_OK
 		});
 }
@@ -575,7 +579,8 @@ int egressgw_tuple_collision2_reply_check_v6(const struct __ctx_buff *ctx)
 	int ret = egressgw_snat_check_v6(ctx, (struct egressgw_test_ctx) {
 			.test = TEST_SNAT_TUPLE_COLLISION,
 			.dir = CT_INGRESS,
-			.packets = 3,
+			.rx_packets = 2,
+			.tx_packets = 1,
 			.status_code = CTX_ACT_REDIRECT,
 		});
 

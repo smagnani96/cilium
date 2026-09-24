@@ -48,6 +48,8 @@ const (
 	CiliumCT6Global                     = "cilium_ct6_global"
 	CiliumCTAny4Global                  = "cilium_ct_any4_global"
 	CiliumCTAny6Global                  = "cilium_ct_any6_global"
+	CiliumCTStats4                      = "cilium_ct_stats4"
+	CiliumCTStats6                      = "cilium_ct_stats6"
 	CiliumDevices                       = "cilium_devices"
 	CiliumEgressGWPolicyV4V2            = "cilium_egress_gw_policy_v4_v2"
 	CiliumEgressGWPolicyV6              = "cilium_egress_gw_policy_v6"
@@ -257,6 +259,34 @@ func newCiliumCTAny6GlobalSpec(btf *btf.Spec) *ebpf.MapSpec {
 		Value:      anyTypeByName(btf, "ct_entry"),
 		MaxEntries: 4096,
 		Flags:      0,
+		Pinning:    ebpf.PinByName,
+	}
+}
+
+func newCiliumCTStats4Spec(btf *btf.Spec) *ebpf.MapSpec {
+	return &ebpf.MapSpec{
+		Name:       CiliumCTStats4,
+		Type:       ebpf.LRUCPUHash,
+		KeySize:    14,
+		Key:        anyTypeByName(btf, "ipv4_ct_tuple"),
+		ValueSize:  32,
+		Value:      anyTypeByName(btf, "ct_stats_value"),
+		MaxEntries: 65535,
+		Flags:      unix.BPF_F_NO_COMMON_LRU,
+		Pinning:    ebpf.PinByName,
+	}
+}
+
+func newCiliumCTStats6Spec(btf *btf.Spec) *ebpf.MapSpec {
+	return &ebpf.MapSpec{
+		Name:       CiliumCTStats6,
+		Type:       ebpf.LRUCPUHash,
+		KeySize:    38,
+		Key:        anyTypeByName(btf, "ipv6_ct_tuple"),
+		ValueSize:  32,
+		Value:      anyTypeByName(btf, "ct_stats_value"),
+		MaxEntries: 65535,
+		Flags:      unix.BPF_F_NO_COMMON_LRU,
 		Pinning:    ebpf.PinByName,
 	}
 }
@@ -1291,6 +1321,8 @@ var _outer []newMapFn = []newMapFn{
 	newCiliumCT6GlobalSpec,
 	newCiliumCTAny4GlobalSpec,
 	newCiliumCTAny6GlobalSpec,
+	newCiliumCTStats4Spec,
+	newCiliumCTStats6Spec,
 	newCiliumDevicesSpec,
 	newCiliumEgressGWPolicyV4V2Spec,
 	newCiliumEgressGWPolicyV6Spec,

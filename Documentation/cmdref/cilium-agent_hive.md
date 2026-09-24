@@ -24,6 +24,7 @@ cilium-agent hive [flags]
       --bgp-router-id-allocation-ip-pool string                   IP pool to allocate the BGP router-id from when the mode is 'ip-pool'
       --bgp-router-id-allocation-mode string                      BGP router-id allocation mode. Currently supported values: 'default' or 'ip-pool' (default "default")
       --bgp-secrets-namespace string                              Kubernetes namespace to get BGP control plane secrets from
+      --bpf-ct-stats-map-max int                                  Maximum number of entries in the percpu stats maps (default 65536)
       --bpf-lb-algorithm string                                   BPF load balancing algorithm ("random", "maglev") (default "random")
       --bpf-lb-algorithm-annotation                               Enable service-level annotation for configuring BPF load balancing algorithm
       --bpf-lb-dsr-dispatch string                                BPF load balancing DSR dispatch method ("opt", "ipip", "geneve") (default "opt")

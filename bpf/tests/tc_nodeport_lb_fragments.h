@@ -255,8 +255,12 @@ int nodeport_lb4_fragments_1_check(struct __ctx_buff *ctx)
 	/* Ensure CT entry is updated accordingly (SVC). */
 	ct_entry = map_lookup_elem(get_ct_map4(&expected_ct_tuple), &expected_ct_tuple);
 	assert(ct_entry);
-	assert(ct_entry->packets == count);
-	assert(ct_entry->bytes == bytes);
+
+	__u64 tx_packets = count;
+	__u64 tx_bytes = bytes;
+
+	assert_metrics_tx_packets(get_ct_stats_map4(), expected_ct_tuple, tx_packets);
+	assert_metrics_tx_bytes(get_ct_stats_map4(), expected_ct_tuple, tx_bytes);
 
 	test_finish();
 }
@@ -334,8 +338,12 @@ int nodeport_lb4_fragments_2_check(struct __ctx_buff *ctx)
 	/* Ensure CT entry is updated accordingly (SVC). */
 	ct_entry = map_lookup_elem(get_ct_map4(&expected_ct_tuple), &expected_ct_tuple);
 	assert(ct_entry);
-	assert(ct_entry->packets == count);
-	assert(ct_entry->bytes == bytes);
+
+	__u64 tx_packets = count;
+	__u64 tx_bytes = bytes;
+
+	assert_metrics_tx_packets(get_ct_stats_map4(), expected_ct_tuple, tx_packets);
+	assert_metrics_tx_bytes(get_ct_stats_map4(), expected_ct_tuple, tx_bytes);
 
 	test_finish();
 }
@@ -425,8 +433,12 @@ int nodeport_lb6_fragment1_check(struct __ctx_buff *ctx)
 	/* Ensure CT entry is updated accordingly (SVC). */
 	ct_entry = map_lookup_elem(get_ct_map6(&expected_ct_tuple), &expected_ct_tuple);
 	assert(ct_entry);
-	assert(ct_entry->packets == count);
-	assert(ct_entry->bytes == bytes);
+
+	__u64 tx_packets = count;
+	__u64 tx_bytes = bytes;
+
+	assert_metrics_tx_packets(get_ct_stats_map6(), expected_ct_tuple, tx_packets);
+	assert_metrics_tx_bytes(get_ct_stats_map6(), expected_ct_tuple, tx_bytes);
 
 	test_finish();
 }
@@ -500,8 +512,12 @@ int nodeport_lb6_fragment2_check(struct __ctx_buff *ctx)
 	/* Ensure CT entry is updated accordingly (SVC). */
 	ct_entry = map_lookup_elem(get_ct_map6(&expected_ct_tuple), &expected_ct_tuple);
 	assert(ct_entry);
-	assert(ct_entry->packets == count);
-	assert(ct_entry->bytes == bytes);
+
+	__u64 tx_packets = count;
+	__u64 tx_bytes = bytes;
+
+	assert_metrics_tx_packets(get_ct_stats_map6(), expected_ct_tuple, tx_packets);
+	assert_metrics_tx_bytes(get_ct_stats_map6(), expected_ct_tuple, tx_bytes);
 
 	test_finish();
 }

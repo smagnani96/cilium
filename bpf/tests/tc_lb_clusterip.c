@@ -180,8 +180,12 @@ int lb4_routable_clusterip_check(__maybe_unused const struct __ctx_buff *ctx)
 	/* Ensure CT entry is updated accordingly (SVC). */
 	ct_entry = map_lookup_elem(get_ct_map4(&tuple), &tuple);
 	assert(ct_entry);
-	assert(ct_entry->packets == 1);
-	assert(ct_entry->bytes == ctx_full_len(ctx) - sizeof(__u32));
+
+	__u64 tx_packets = 1;
+	__u64 tx_bytes = ctx_full_len(ctx) - sizeof(__u32);
+
+	assert_metrics_tx_packets(get_ct_stats_map4(), tuple, tx_packets);
+	assert_metrics_tx_bytes(get_ct_stats_map4(), tuple, tx_bytes);
 
 	ASSERT_CTX_BUF_OFF("lb4_routable_clusterip", "Ether", ctx, sizeof(__u32),
 			   lb4_clusterip_post_dnat, sizeof(lb4_clusterip_post_dnat));
@@ -313,8 +317,12 @@ int lb6_routable_clusterip_check(__maybe_unused const struct __ctx_buff *ctx)
 	/* Ensure CT entry is updated accordingly (SVC). */
 	ct_entry = map_lookup_elem(get_ct_map6(&tuple), &tuple);
 	assert(ct_entry);
-	assert(ct_entry->packets == 1);
-	assert(ct_entry->bytes == ctx_full_len(ctx) - sizeof(__u32));
+
+	__u64 tx_packets = 1;
+	__u64 tx_bytes = ctx_full_len(ctx) - sizeof(__u32);
+
+	assert_metrics_tx_packets(get_ct_stats_map6(), tuple, tx_packets);
+	assert_metrics_tx_bytes(get_ct_stats_map6(), tuple, tx_bytes);
 
 	ASSERT_CTX_BUF_OFF("lb6_routable_clusterip", "Ether", ctx, sizeof(__u32),
 			   lb6_clusterip_post_dnat, sizeof(lb6_clusterip_post_dnat));

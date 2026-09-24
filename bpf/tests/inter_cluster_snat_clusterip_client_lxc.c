@@ -331,8 +331,11 @@ int overlay_to_lxc_synack_check(struct __ctx_buff *ctx)
 	if (!entry)
 		test_fatal("couldn't find egress conntrack entry");
 
-	if (entry->packets != 2)
-		test_fatal("rx packet didn't hit ingress conntrack entry");
+	__u64 tx_packets = 1;
+	__u64 rx_packets = 1;
+
+	assert_metrics_tx_packets(get_ct_stats_map4(), tuple, tx_packets);
+	assert_metrics_rx_packets(get_ct_stats_map4(), tuple, rx_packets);
 
 	test_finish();
 }
@@ -421,8 +424,11 @@ int lxc_to_overlay_ack_check(struct __ctx_buff *ctx)
 	if (!entry)
 		test_fatal("couldn't find egress conntrack entry");
 
-	if (entry->packets != 3)
-		test_fatal("tx packet didn't hit egress conntrack entry");
+	__u64 tx_packets = 2;
+	__u64 rx_packets = 1;
+
+	assert_metrics_tx_packets(get_ct_stats_map4(), tuple, tx_packets);
+	assert_metrics_rx_packets(get_ct_stats_map4(), tuple, rx_packets);
 
 	test_finish();
 }

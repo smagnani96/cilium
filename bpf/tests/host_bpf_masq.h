@@ -108,7 +108,9 @@ int host_bpf_masq_v4_1_udp_check(const struct __ctx_buff *ctx)
 	if (!ct_entry)
 		test_fatal("no CT entry found");
 
-	assert(ct_entry->packets == 1);
+	__u64 tx_packets = 1;
+
+	assert_metrics_tx_packets(get_ct_stats_map4(), tuple, tx_packets);
 
 	test_finish();
 }
@@ -183,7 +185,9 @@ int host_bpf_masq_v6_1_udp_check(const struct __ctx_buff *ctx)
 	if (!ct_entry)
 		test_fatal("no CT entry found");
 
-	assert(ct_entry->packets == 1);
+	__u64 tx_packets = 1;
+
+	assert_metrics_tx_packets(get_ct_stats_map6(), tuple, tx_packets);
 
 	test_finish();
 }
@@ -461,7 +465,9 @@ int host_bpf_masq_v4_4_icmp_echo_check(const struct __ctx_buff *ctx)
 	if (!ct_entry)
 		test_fatal("no CT entry found");
 
-	assert(ct_entry->packets == 1);
+	__u64 tx_packets = 1;
+
+	assert_metrics_tx_packets(get_ct_stats_map4(), tuple, tx_packets);
 
 	test_finish();
 }
@@ -531,7 +537,9 @@ int host_bpf_masq_v6_4_icmp_echo_check(const struct __ctx_buff *ctx)
 	if (!ct_entry)
 		test_fatal("no CT entry found");
 
-	assert(ct_entry->packets == 1);
+	__u64 tx_packets = 1;
+
+	assert_metrics_tx_packets(get_ct_stats_map6(), tuple, tx_packets);
 
 	test_finish();
 }

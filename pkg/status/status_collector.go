@@ -413,6 +413,10 @@ func (d *statusCollector) getBPFMapStatus() *models.BPFMapStatus {
 		policyMaxEntries = int64(d.statusParams.PolicyMapFactory.PolicyMaxEntries())
 		policyStatsMaxEntries = int64(d.statusParams.PolicyMapFactory.StatsMaxEntries())
 	}
+	ctStatsMaxEntries := int64(0)
+	if d.statusParams.CTStatsMaps != nil {
+		ctStatsMaxEntries = int64(d.statusParams.CTStatsMaps.MaxEntries())
+	}
 
 	return &models.BPFMapStatus{
 		DynamicSizeRatio: d.statusParams.DaemonConfig.BPFMapsDynamicSizeRatio,
@@ -424,6 +428,10 @@ func (d *statusCollector) getBPFMapStatus() *models.BPFMapStatus {
 			{
 				Name: "TCP connection tracking",
 				Size: int64(d.statusParams.DaemonConfig.CTMapEntriesGlobalTCP),
+			},
+			{
+				Name: "CT packet/byte accounting",
+				Size: ctStatsMaxEntries,
 			},
 			{
 				Name: "Endpoints",

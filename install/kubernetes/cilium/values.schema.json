@@ -534,6 +534,12 @@
             "integer"
           ]
         },
+        "ctStatsMax": {
+          "type": [
+            "null",
+            "integer"
+          ]
+        },
         "ctTcpMax": {
           "type": [
             "null",

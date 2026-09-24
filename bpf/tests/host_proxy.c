@@ -108,8 +108,11 @@ check_redirect(struct __ctx_buff *ctx, bool to_pod)
 	if (!ct_entry)
 		test_fatal("no CT entry found");
 
-	assert(ct_entry->packets == 1);
 	assert(ct_entry->proxy_redirect);
+
+	__u64 tx_packets = 1;
+
+	assert_metrics_tx_packets(get_ct_stats_map4(), tuple, tx_packets);
 
 	test_finish();
 }
@@ -168,8 +171,11 @@ check_passthrough(const struct __ctx_buff *ctx, bool to_pod)
 	if (!ct_entry)
 		test_fatal("no CT entry found");
 
-	assert(ct_entry->packets == 1);
 	assert(!ct_entry->proxy_redirect);
+
+	__u64 tx_packets = 1;
+
+	assert_metrics_tx_packets(get_ct_stats_map4(), tuple, tx_packets);
 
 	/* Check that the original CT entry was not hit */
 	tuple.sport = NODE_PORT;
@@ -178,7 +184,7 @@ check_passthrough(const struct __ctx_buff *ctx, bool to_pod)
 	if (!ct_entry)
 		test_fatal("no CT entry found");
 
-	assert(ct_entry->packets == 1);
+	assert_metrics_tx_packets(get_ct_stats_map4(), tuple, tx_packets);
 
 	test_finish();
 }

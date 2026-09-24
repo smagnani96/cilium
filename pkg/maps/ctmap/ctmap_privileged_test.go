@@ -77,8 +77,6 @@ func BenchmarkPrivileged_MapUpdate(b *testing.B) {
 		},
 	}
 	value := &CtEntry{
-		Packets:          4 + 4,
-		Bytes:            216 + 216,
 		Lifetime:         37459,
 		Flags:            SeenNonSyn | RxClosing,
 		RevNAT:           0,
@@ -162,8 +160,6 @@ func TestPrivilegedCtGcIcmp(t *testing.T) {
 		},
 	}
 	ctVal := &CtEntry{
-		Packets:  1,
-		Bytes:    216,
 		Lifetime: 37459,
 	}
 	err = ctMap.Map.Update(ctKey, ctVal)
@@ -277,8 +273,6 @@ func TestPrivilegedCtGcTcp(t *testing.T) {
 		},
 	}
 	ctVal := &CtEntry{
-		Packets:  1,
-		Bytes:    216,
 		Lifetime: 37459,
 	}
 	err = ctMap.Map.Update(ctKey, ctVal)
@@ -392,8 +386,6 @@ func TestPrivilegedCtGcDsr(t *testing.T) {
 		},
 	}
 	ctVal := &CtEntry{
-		Packets:  1,
-		Bytes:    216,
 		Lifetime: 37459,
 		Flags:    DSRInternal,
 	}
@@ -510,8 +502,6 @@ func TestPrivilegedOrphanNatGC(t *testing.T) {
 		},
 	}
 	ctVal := &CtEntry{
-		Packets:  1,
-		Bytes:    216,
 		Lifetime: 37459,
 	}
 	err = ctMapAny.Map.Update(ctKey, ctVal)
@@ -616,8 +606,6 @@ func TestPrivilegedOrphanNatGC(t *testing.T) {
 		},
 	}
 	ctVal = &CtEntry{
-		Packets:  1,
-		Bytes:    216,
 		Lifetime: 37459,
 		Flags:    DSRInternal,
 	}
@@ -830,8 +818,6 @@ func TestPrivilegedCtNetworkID(t *testing.T) {
 		},
 	}
 	ctVal := &CtEntry{
-		Packets:  1,
-		Bytes:    216,
 		Lifetime: 37459,
 	}
 	err = ctMap.Map.Update(ctKey, ctVal)
@@ -851,8 +837,6 @@ func TestPrivilegedCtNetworkID(t *testing.T) {
 		},
 	}
 	ctVal = &CtEntry{
-		Packets:  3,
-		Bytes:    360,
 		Lifetime: 40000,
 	}
 	err = ctMap.Map.Update(ctKey, ctVal)
@@ -872,8 +856,6 @@ func TestPrivilegedCtNetworkID(t *testing.T) {
 		},
 	}
 	ctVal = &CtEntry{
-		Packets:  1,
-		Bytes:    216,
 		Lifetime: 50000,
 	}
 	err = ctMap.Map.Update(ctKey, ctVal)
@@ -938,8 +920,6 @@ func populateFakeDataCTMap4(tb testing.TB, m CtMap, size int) map[*CtKey4Global]
 		}
 	}
 	value := &CtEntry{
-		Packets:          4 + 4,
-		Bytes:            216 + 216,
 		Lifetime:         37459,
 		Flags:            SeenNonSyn | RxClosing,
 		RevNAT:           0,
@@ -1022,8 +1002,6 @@ func benchmarkCtGc(t *testing.B, size int) {
 				},
 			}
 			ctVal := &CtEntry{
-				Packets:  1,
-				Bytes:    216,
 				Lifetime: 2,
 			}
 			err = ctMap.Map.Update(ctKey, ctVal)

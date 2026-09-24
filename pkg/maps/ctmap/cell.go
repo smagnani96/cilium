@@ -5,11 +5,15 @@ package ctmap
 
 import (
 	"fmt"
+	"log/slog"
 	"slices"
 
 	"github.com/cilium/hive/cell"
+	"github.com/spf13/pflag"
 
 	"github.com/cilium/cilium/pkg/bpf"
+	"github.com/cilium/cilium/pkg/datapath/linux/config/defines"
+	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/cilium/cilium/pkg/maps/nat"
 	"github.com/cilium/cilium/pkg/metrics"
 	"github.com/cilium/cilium/pkg/option"
@@ -20,8 +24,26 @@ var Cell = cell.Module(
 	"ct-map",
 	"eBPF map which manages connection tracking",
 
-	cell.Provide(newCTMaps),
+	cell.Config(defaultCTConfig),
+	cell.Provide(newCTMaps, newCTStatsMaps),
 )
+
+type Config struct {
+	// BpfCTStatsMapMax is the maximum number of entries allowed in the percpu stats map.
+	BpfCTStatsMapMax int
+}
+
+var defaultCTConfig = Config{
+	BpfCTStatsMapMax: 1 << 16,
+}
+
+const (
+	CTStatsMapMaxName = "bpf-ct-stats-map-max"
+)
+
+func (def Config) Flags(flags *pflag.FlagSet) {
+	flags.Int(CTStatsMapMaxName, def.BpfCTStatsMapMax, "Maximum number of entries in the percpu stats maps")
+}
 
 func newCTMaps(lifecycle cell.Lifecycle, daemonConfig *option.DaemonConfig, registry *metrics.Registry, natMap4 nat.NatMap4, natMap6 nat.NatMap6) bpf.MapOut[CTMaps] {
 	InitMapInfo(natMap4, natMap6)
@@ -87,5 +109,106 @@ func (r *ctMaps) close() error {
 		}
 	}
 
+	return nil
+}
+
+func newCTStatsMaps(in struct {
+	cell.In
+
+	Lifecycle    cell.Lifecycle
+	Log          *slog.Logger
+	DaemonConfig *option.DaemonConfig
+	Config
+}) (out struct {
+	cell.Out
+
+	bpf.MapOut[StatsMaps]
+	defines.NodeOut
+}) {
+	if in.BpfCTStatsMapMax < option.LimitTableMin {
+		in.Log.Warn("specified ct stats map max entries too low, using minimum value instead",
+			logfields.Entries, in.BpfCTStatsMapMax,
+			logfields.Minimum, option.LimitTableMin)
+		in.BpfCTStatsMapMax = option.LimitTableMin
+	}
+	if in.BpfCTStatsMapMax > option.LimitTableMax {
+		in.Log.Warn("specified ct stats map max entries too high, using maximum value instead",
+			logfields.Entries, in.BpfCTStatsMapMax,
+			logfields.Maximum, option.LimitTableMax)
+		in.BpfCTStatsMapMax = option.LimitTableMax
+	}
+
+	var maps statsMaps
+	var maxStatsEntries int
+	if in.DaemonConfig.IPv4Enabled() && in.DaemonConfig.BPFConntrackAccounting {
+		maps.v4StatsMap, maxStatsEntries = newStatsMap(mapTypeStats4, in.BpfCTStatsMapMax, in.Log)
+		if int(maxStatsEntries) != in.BpfCTStatsMapMax {
+			in.Log.Debug("Rounded ct stats v4 map size down to the closest multiple of the number of possible CPUs",
+				logfields.Entries, maxStatsEntries)
+		}
+	}
+
+	if in.DaemonConfig.IPv6Enabled() && in.DaemonConfig.BPFConntrackAccounting {
+		maps.v6StatsMap, maxStatsEntries = newStatsMap(mapTypeStats6, in.BpfCTStatsMapMax, in.Log)
+		if int(maxStatsEntries) != in.BpfCTStatsMapMax {
+			in.Log.Debug("Rounded ct stats v6 map size down to the closest multiple of the number of possible CPUs",
+				logfields.Entries, maxStatsEntries)
+		}
+	}
+	maps.maxStatsEntries = maxStatsEntries
+
+	out.NodeDefines = map[string]string{
+		"CT_STATS_MAP_SIZE": fmt.Sprint(in.BpfCTStatsMapMax),
+	}
+
+	in.Lifecycle.Append(cell.Hook{
+		OnStart: func(context cell.HookContext) error {
+			return maps.init()
+		},
+		OnStop: func(context cell.HookContext) error {
+			return maps.close()
+		},
+	})
+
+	out.MapOut = bpf.NewMapOut(StatsMaps(&maps))
+	return
+}
+
+type StatsMaps interface {
+	MaxEntries() int
+}
+
+type statsMaps struct {
+	v4StatsMap *StatsMap
+	v6StatsMap *StatsMap
+
+	maxStatsEntries int
+}
+
+func (s *statsMaps) MaxEntries() int {
+	return s.maxStatsEntries
+}
+
+func (s *statsMaps) init() error {
+	for _, m := range []*StatsMap{s.v4StatsMap, s.v6StatsMap} {
+		if m == nil {
+			continue
+		}
+		if err := m.OpenOrCreate(); err != nil {
+			return fmt.Errorf("failed to open and create %s map: %w", m.Name(), err)
+		}
+	}
+	return nil
+}
+
+func (s *statsMaps) close() error {
+	for _, m := range []*StatsMap{s.v4StatsMap, s.v6StatsMap} {
+		if m == nil {
+			continue
+		}
+		if err := m.Close(); err != nil {
+			return fmt.Errorf("failed to close %s map: %w", m.Name(), err)
+		}
+	}
 	return nil
 }

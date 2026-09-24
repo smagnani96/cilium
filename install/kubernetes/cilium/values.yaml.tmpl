@@ -573,6 +573,13 @@ bpf:
   # @schema
   # type: [null, integer]
   # @schema
+  # -- (int) Configure the maximum number of entries in the connection tracking stats map
+  # table.
+  # @default -- `65536`
+  ctStatsMax: ~
+  # @schema
+  # type: [null, integer]
+  # @schema
   # -- (int) Configure the maximum number of entries in the TCP connection tracking
   # table.
   # @default -- `524288`

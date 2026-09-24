@@ -17,6 +17,7 @@
 #include "l4.h"
 #include "ipfrag.h"
 #include "auxvars.h"
+#include "conntrack_stats.h"
 
 /* Traffic is allowed/dropped based on user-defined policies. */
 DECLARE_CONFIG(bool, enable_extended_ip_protocols, "Pass traffic with extended IP protocols")
@@ -95,8 +96,8 @@ struct ct_entry {
 			__u64 backend_id;
 		};
 	};
-	__u64 packets;
-	__u64 bytes;
+	__u64 reserved4;	/* unused since v1.21 */
+	__u64 reserved5;	/* unused since v1.21 */
 	__u32 lifetime;
 	__u16 rx_closing:1,
 	      tx_closing:1,
@@ -357,7 +358,7 @@ static __always_inline enum ct_status
 __ct_lookup(const void *map, const struct __ctx_buff *ctx, const void *tuple,
 	    enum ct_action action, enum ct_dir dir, __u32 ct_entry_types,
 	    struct ct_state *ct_state, bool is_tcp, union tcp_flags seen_flags,
-	    __u32 *monitor)
+	    __u32 *monitor, const void *stats_map)
 {
 	bool syn = seen_flags.value & TCP_FLAG_SYN;
 	struct ct_entry *entry;
@@ -377,8 +378,7 @@ __ct_lookup(const void *map, const struct __ctx_buff *ctx, const void *tuple,
 			*monitor = ct_update_timeout(entry, is_tcp, dir, seen_flags);
 
 		if (CONFIG(enable_conntrack_accounting)) {
-			__sync_fetch_and_add(&entry->packets, 1);
-			__sync_fetch_and_add(&entry->bytes, ctx_full_len(ctx));
+			ct_stats_update(stats_map, tuple, ctx_full_len(ctx), dir);
 		}
 
 		switch (action) {
@@ -687,7 +687,8 @@ __ct_lookup6(const void *map, struct ipv6_ct_tuple *tuple, const struct __ctx_bu
 	case SCOPE_BIDIR:
 		/* Lookup in the reverse direction first: */
 		ret = __ct_lookup(map, ctx, tuple, action, dir, ct_entry_types,
-				  ct_state, is_tcp, tcp_flags, monitor);
+				  ct_state, is_tcp, tcp_flags, monitor,
+				  get_ct_stats_map6());
 		if (ret != CT_NEW) {
 			if (unlikely(tuple->flags & TUPLE_F_RELATED))
 				ret = CT_RELATED;
@@ -704,7 +705,8 @@ __ct_lookup6(const void *map, struct ipv6_ct_tuple *tuple, const struct __ctx_bu
 		fallthrough;
 	case SCOPE_FORWARD:
 		ret = __ct_lookup(map, ctx, tuple, action, dir, ct_entry_types,
-				  ct_state, is_tcp, tcp_flags, monitor);
+				  ct_state, is_tcp, tcp_flags, monitor,
+				  get_ct_stats_map6());
 	}
 
 out:
@@ -937,7 +939,8 @@ __ct_lookup4(const void *map, struct ipv4_ct_tuple *tuple, const struct __ctx_bu
 	case SCOPE_BIDIR:
 		/* Lookup in the reverse direction first: */
 		ret = __ct_lookup(map, ctx, tuple, action, dir, ct_entry_types,
-				  ct_state, is_tcp, tcp_flags, monitor);
+				  ct_state, is_tcp, tcp_flags, monitor,
+				  get_ct_stats_map4());
 		if (ret != CT_NEW) {
 			if (unlikely(tuple->flags & TUPLE_F_RELATED))
 				ret = CT_RELATED;
@@ -954,7 +957,8 @@ __ct_lookup4(const void *map, struct ipv4_ct_tuple *tuple, const struct __ctx_bu
 		fallthrough;
 	case SCOPE_FORWARD:
 		ret = __ct_lookup(map, ctx, tuple, action, dir, ct_entry_types,
-				  ct_state, is_tcp, tcp_flags, monitor);
+				  ct_state, is_tcp, tcp_flags, monitor,
+				  get_ct_stats_map4());
 	}
 
 out:
@@ -1091,8 +1095,7 @@ static __always_inline int ct_create6(const void *map_main, const void *map_rela
 	}
 
 	if (CONFIG(enable_conntrack_accounting)) {
-		entry->packets = 1;
-		entry->bytes = ctx_full_len(ctx);
+		ct_stats_create(get_ct_stats_map6(), tuple, ctx_full_len(ctx), dir);
 	}
 
 	err = map_update_elem(map_main, tuple, entry, 0);
@@ -1151,8 +1154,7 @@ static __always_inline int ct_create4(const void *map_main,
 	}
 
 	if (CONFIG(enable_conntrack_accounting)) {
-		entry->packets = 1;
-		entry->bytes = ctx_full_len(ctx);
+		ct_stats_create(get_ct_stats_map4(), tuple, ctx_full_len(ctx), dir);
 	}
 
 	/* Previous map update succeeded, we could delete it in case

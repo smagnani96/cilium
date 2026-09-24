@@ -129,7 +129,9 @@ int lxc_igmp_egress_check(const struct __ctx_buff *ctx)
 	if (!ct_entry)
 		test_fatal("no CT entry found");
 
-	assert(ct_entry->packets == 1);
+	__u64 tx_packets = 1;
+
+	assert_metrics_tx_packets(get_ct_stats_map4(), tuple, tx_packets);
 
 	policy_delete_egress_all_entry();
 

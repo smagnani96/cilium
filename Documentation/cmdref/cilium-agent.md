@@ -34,6 +34,7 @@ cilium-agent [flags]
       --bpf-conntrack-accounting                                  Enable CT accounting for packets and bytes (default false)
       --bpf-ct-global-any-max int                                 Maximum number of entries in non-TCP CT table (default 262144)
       --bpf-ct-global-tcp-max int                                 Maximum number of entries in TCP CT table (default 524288)
+      --bpf-ct-stats-map-max int                                  Maximum number of entries in the percpu stats maps (default 65536)
       --bpf-ct-timeout-regular-any duration                       Timeout for entries in non-TCP CT table (default 1m0s)
       --bpf-ct-timeout-regular-tcp duration                       Timeout for established entries in TCP CT table (default 2h13m20s)
       --bpf-ct-timeout-regular-tcp-fin duration                   Teardown timeout for entries in TCP CT table (default 10s)

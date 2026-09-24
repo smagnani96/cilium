@@ -298,3 +298,70 @@ test_result_cursor = 0;
 	} \
 	assert(sum == (__bytes)); \
 })
+
+/* Asserts that the sum of per-cpu ct stats map rx_bytes counters for a key */
+#define assert_metrics_rx_bytes(map, key, __rx_bytes) \
+({ \
+	struct ct_stats_value *__entry = NULL; \
+	__u64 sum = 0; \
+	/* Iterate until lookup encounters null when hitting cpu number */ \
+	/* Assumes at most 128 CPUS */ \
+	for (int i = 0; i < MAX_ASSERT_CPUS; i++) { \
+		__entry = map_lookup_percpu_elem(map, &(key), i); \
+		if (!__entry) { \
+			break; \
+		} \
+		sum += __entry->rx_bytes; \
+	} \
+	assert(sum == (__rx_bytes)); \
+})
+
+/* Asserts that the sum of per-cpu ct stats map rx_packets counters for a key */
+#define assert_metrics_rx_packets(map, key, __rx_packets) \
+({ \
+	struct ct_stats_value *__entry = NULL; \
+	__u64 sum = 0; \
+	/* Iterate until lookup encounters null when hitting cpu number */ \
+	/* Assumes at most 128 CPUS */ \
+	for (int i = 0; i < MAX_ASSERT_CPUS; i++) { \
+		__entry = map_lookup_percpu_elem(map, &(key), i); \
+		if (!__entry) { \
+			break; \
+		} \
+		sum += __entry->rx_packets; \
+	} \
+	assert(sum == (__rx_packets)); \
+})
+
+/* Asserts that the sum of per-cpu ct stats map tx_bytes counters for a key */
+#define assert_metrics_tx_bytes(map, key, __tx_bytes) \
+({ \
+	struct ct_stats_value *__entry = NULL; \
+	__u64 sum = 0; \
+	/* Iterate until lookup encounters null when hitting cpu number */ \
+	/* Assumes at most 128 CPUS */ \
+	for (int i = 0; i < MAX_ASSERT_CPUS; i++) { \
+		__entry = map_lookup_percpu_elem(map, &(key), i); \
+		if (!__entry) { \
+			break; \
+		} \
+		sum += __entry->tx_bytes; \
+	} \
+	assert(sum == (__tx_bytes)); \
+})
+
+#define assert_metrics_tx_packets(map, key, __tx_packets) \
+({ \
+	struct ct_stats_value *__entry = NULL; \
+	__u64 sum = 0; \
+	/* Iterate until lookup encounters null when hitting cpu number */ \
+	/* Assumes at most 128 CPUS */ \
+	for (int i = 0; i < MAX_ASSERT_CPUS; i++) { \
+		__entry = map_lookup_percpu_elem(map, &(key), i); \
+		if (!__entry) { \
+			break; \
+		} \
+		sum += __entry->tx_packets; \
+	} \
+	assert(sum == (__tx_packets)); \
+})

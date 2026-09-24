@@ -30,6 +30,7 @@ var (
 		"ipv4_ct_tuple":        {ctmap.CtKey4Global{}},
 		"ipv6_ct_tuple":        {ctmap.CtKey6Global{}},
 		"ct_entry":             {ctmap.CtEntry{}},
+		"ct_stats_value":       {ctmap.StatsValue{}},
 		"ipcache_key":          {ipcachemap.Key{}},
 		"remote_endpoint_info": {ipcachemap.RemoteEndpointInfo{}},
 		"lb4_key":              {lbmap.Service4Key{}},

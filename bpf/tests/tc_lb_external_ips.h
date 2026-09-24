@@ -167,8 +167,12 @@ int lb4_external_ips_check(__maybe_unused const struct __ctx_buff *ctx)
 	/* Ensure CT entry is updated accordingly (SVC). */
 	ct_entry = map_lookup_elem(get_ct_map4(&tuple), &tuple);
 	assert(ct_entry);
-	assert(ct_entry->packets == 1);
-	assert(ct_entry->bytes == sizeof(lb4_ns_external_ip_post_dnat));
+
+	__u64 tx_packets = 1;
+	__u64 tx_bytes = sizeof(lb4_ns_external_ip_post_dnat);
+
+	assert_metrics_tx_packets(get_ct_stats_map4(), tuple, tx_packets);
+	assert_metrics_tx_bytes(get_ct_stats_map4(), tuple, tx_bytes);
 #else
 	/* Ensure packet is dropped. */
 	assert(*status_code == CTX_ACT_DROP);
@@ -262,8 +266,12 @@ int lb6_external_ips_check(__maybe_unused const struct __ctx_buff *ctx)
 	/* Ensure CT entry is updated accordingly (SVC). */
 	ct_entry = map_lookup_elem(get_ct_map6(&tuple), &tuple);
 	assert(ct_entry);
-	assert(ct_entry->packets == 1);
-	assert(ct_entry->bytes == sizeof(lb6_ns_external_ip_post_dnat));
+
+	__u64 tx_packets = 1;
+	__u64 tx_bytes = sizeof(lb6_ns_external_ip_post_dnat);
+
+	assert_metrics_tx_packets(get_ct_stats_map6(), tuple, tx_packets);
+	assert_metrics_tx_bytes(get_ct_stats_map6(), tuple, tx_bytes);
 #else
 	/* Ensure packet is dropped. */
 	assert(*status_code == CTX_ACT_DROP);

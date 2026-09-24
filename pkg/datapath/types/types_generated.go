@@ -32,8 +32,8 @@ type CTEntry struct {
 		_    structs.HostLayout
 		Addr [16]uint8
 	}
-	Packets      uint64
-	Bytes        uint64
+	Reserved4    uint64
+	Reserved5    uint64
 	Lifetime     uint32
 	_            [2]byte /* unsupported bitfield */
 	RevNATIndex  uint16
@@ -43,6 +43,15 @@ type CTEntry struct {
 	SrcSecID     uint32
 	LastTxReport uint32
 	LastRxReport uint32
+}
+
+// CTStatsValue is generated from the BPF C type ct_stats_value.
+type CTStatsValue struct {
+	_         structs.HostLayout
+	RxPackets uint64
+	RxBytes   uint64
+	TxPackets uint64
+	TxBytes   uint64
 }
 
 // CTTimeoutConfig is generated from the BPF C type ct_timeout_config.

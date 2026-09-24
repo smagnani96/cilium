@@ -310,8 +310,8 @@ func (k *CtKey6Global) GetTupleKey() tuple.TupleKey {
 // CtEntry represents an entry in the connection tracking table.
 type CtEntry struct {
 	Union0   [2]uint64 `align:"$union0"`
-	Packets  uint64    `align:"packets"`
-	Bytes    uint64    `align:"bytes"`
+	_        uint64    `align:"reserved4"`
+	_        uint64    `align:"reserved5"`
 	Lifetime uint32    `align:"lifetime"`
 	Flags    uint16    `align:"rx_closing"`
 	// RevNAT is in network byte order
@@ -398,11 +398,9 @@ func (c *CtEntry) StringWithTimeDiff(toRemSecs func(uint32) string) string {
 		timeDiff = ""
 	}
 
-	return fmt.Sprintf("expires=%d%s Packets=%d Bytes=%d RxFlagsSeen=%#02x LastRxReport=%d TxFlagsSeen=%#02x LastTxReport=%d %s RevNAT=%d SourceSecurityID=%d BackendID=%d NatPort=%d \n",
+	return fmt.Sprintf("expires=%d%s RxFlagsSeen=%#02x LastRxReport=%d TxFlagsSeen=%#02x LastTxReport=%d %s RevNAT=%d SourceSecurityID=%d BackendID=%d NatPort=%d \n",
 		c.Lifetime,
 		timeDiff,
-		c.Packets,
-		c.Bytes,
 		c.RxFlagsSeen,
 		c.LastRxReport,
 		c.TxFlagsSeen,

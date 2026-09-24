@@ -35,6 +35,7 @@ import (
 	"github.com/cilium/cilium/pkg/loadbalancer"
 	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/cilium/cilium/pkg/maglev"
+	"github.com/cilium/cilium/pkg/maps/ctmap"
 	"github.com/cilium/cilium/pkg/maps/policymap"
 	monitoragent "github.com/cilium/cilium/pkg/monitor/agent"
 	"github.com/cilium/cilium/pkg/node"
@@ -106,6 +107,7 @@ type statusParams struct {
 	WireguardAgent   wgTypes.Agent
 	ZtunnelConfig    zconfig.Config
 	ConnectorConfig  connector.Config
+	CTStatsMaps      ctmap.StatsMaps
 }
 
 // Config is the collector configuration
