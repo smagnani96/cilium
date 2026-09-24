@@ -289,10 +289,14 @@ message GetConntrackStatsRequest {
 
 // GetConntrackStatsResponse streams the entries themselves, or a status update
 // about the node. A header is always sent before the entries it applies to.
+// Every ConntrackStatsEndpoint referenced by an entry's source_endpoint_index or
+// destination_endpoint_index is guaranteed to have been sent earlier in the
+// same response stream.
 message GetConntrackStatsResponse {
     oneof response_types {
         ConntrackStatsEntry entry = 1;
         relay.NodeStatusEvent node_status = 2;
+        ConntrackStatsEndpoint endpoint = 3;
     }
 }
 
@@ -326,6 +330,20 @@ message ConntrackStatsValue {
 message ConntrackStatsEntry {
     ConntrackStatsKey key = 1;
     ConntrackStatsValue value = 2;
+
+    // source_endpoint_index/destination_endpoint_index reference, by index,
+    // a ConntrackStatsEndpoint message carrying the resolved source/destination
+    // flow.Endpoint for this entry. They are unset if resolution failed.
+    google.protobuf.UInt32Value source_endpoint_index = 3;
+    google.protobuf.UInt32Value destination_endpoint_index = 4;
+}
+
+// ConntrackStatsEndpoint carries a single resolved source or destination
+// flow.Endpoint referenced by one or more ConntrackStatsEntry messages, alongside
+// the index they reference it by.
+message ConntrackStatsEndpoint {
+    uint32 index = 1;
+    flow.Endpoint endpoint = 2;
 }
 
 // ExportEvent contains an event to be exported. Not to be used outside of the

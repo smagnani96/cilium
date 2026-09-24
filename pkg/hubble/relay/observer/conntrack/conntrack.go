@@ -9,7 +9,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	flowpb "github.com/cilium/cilium/api/v1/flow"
 	observerpb "github.com/cilium/cilium/api/v1/observer"
+	hubbleconntrack "github.com/cilium/cilium/pkg/hubble/observer/conntrack"
 	"golang.org/x/sync/singleflight"
 )
 
@@ -38,11 +40,16 @@ type ctValue struct {
 	// flags holds the real (unmasked) flags of whichever entry is currently
 	// canonical for this key, for display purposes; see aggregateCtEntry.
 	flags uint32
+	// srcEndpointIdx/dstEndpointIdx index into the ctStats-wide
+	// EndpointDedup this value's connection was aggregated into, once a
+	// peer manages to resolve the corresponding Endpoint. See aggregateCtEntry.
+	srcEndpointIdx, dstEndpointIdx *uint32
 }
 
 // ctStats holds the aggregated conntrack stats for a cluster.
 type ctStats struct {
 	entries      map[ctKey]*ctValue
+	endpoints    *hubbleconntrack.EndpointDedup
 	nodeStatuses []*observerpb.GetConntrackStatsResponse
 	computedAt   time.Time
 }
@@ -65,6 +72,8 @@ func (c *ctStats) Entries() iter.Seq[*observerpb.ConntrackStatsEntry] {
 					RxBytes:   v.rxBytes,
 					TxBytes:   v.txBytes,
 				},
+				SourceEndpointIndex:      hubbleconntrack.Wrap(v.srcEndpointIdx),
+				DestinationEndpointIndex: hubbleconntrack.Wrap(v.dstEndpointIdx),
 			}
 			if !yield(e) {
 				return
@@ -73,20 +82,27 @@ func (c *ctStats) Entries() iter.Seq[*observerpb.ConntrackStatsEntry] {
 	}
 }
 
+func (c *ctStats) Endpoints() iter.Seq[*observerpb.ConntrackStatsEndpoint] {
+	if c.endpoints == nil {
+		return func(func(*observerpb.ConntrackStatsEndpoint) bool) {}
+	}
+	return c.endpoints.Endpoints()
+}
+
 func (c *ctStats) NodeStatuses() []*observerpb.GetConntrackStatsResponse {
 	return c.nodeStatuses
 }
 
 // ctStatsExporter is responsible for exporting conntrack stats retrieved from multiple nodes.
 type ctStatsExporter struct {
-	fetch func(ctx context.Context) (<-chan *observerpb.GetConntrackStatsResponse, func() error)
+	fetch func(ctx context.Context) (<-chan *PeerResponse, func() error)
 
 	stats    atomic.Pointer[ctStats]
 	refresh  singleflight.Group
 	cacheTTL time.Duration
 }
 
-func newCTStatsExporter(cacheTTL time.Duration, fetch func(ctx context.Context) (<-chan *observerpb.GetConntrackStatsResponse, func() error)) *ctStatsExporter {
+func newCTStatsExporter(cacheTTL time.Duration, fetch func(ctx context.Context) (<-chan *PeerResponse, func() error)) *ctStatsExporter {
 	return &ctStatsExporter{fetch: fetch, cacheTTL: cacheTTL}
 }
 
@@ -135,25 +151,60 @@ func (c *ctStatsExporter) cachedStats() *ctStats {
 // mergeConntrackResponses consumes every peer's GetConntrackStats responses
 // as they arrive on responses, merging entries for the same connection into
 // a single cluster-wide entry and separating out the node_status responses
-// of peers the relay could not retrieve a snapshot from.
-func mergeConntrackResponses(responses <-chan *observerpb.GetConntrackStatsResponse) *ctStats {
+// of peers the relay could not retrieve a snapshot from. It returns no
+// entries if no peer contributed any.
+//
+// ConntrackStatsEndpoint messages are resolved against the peer that sent them
+// (peer-local indices aren't meaningful across peers, see PeerResponse) and
+// re-deduplicated into the returned, cluster-wide EndpointDedup, so the same
+// resolved Endpoint reported by multiple nodes (e.g. a popular destination
+// pod reached from many client nodes) is still only kept once.
+func mergeConntrackResponses(responses <-chan *PeerResponse) *ctStats {
 	stats := &ctStats{
 		entries:      make(map[ctKey]*ctValue),
 		nodeStatuses: make([]*observerpb.GetConntrackStatsResponse, 0),
+		endpoints:    hubbleconntrack.NewEndpointDedup(),
 	}
+	peerEndpoints := make(map[string]map[uint32]*flowpb.Endpoint)
 
-	for resp := range responses {
+	for pr := range responses {
+		resp := pr.Response
 		if ns := resp.GetNodeStatus(); ns != nil {
 			stats.nodeStatuses = append(stats.nodeStatuses, resp)
 			continue
 		}
+		if ce := resp.GetEndpoint(); ce != nil {
+			m := peerEndpoints[pr.Peer]
+			if m == nil {
+				m = make(map[uint32]*flowpb.Endpoint)
+				peerEndpoints[pr.Peer] = m
+			}
+			m[ce.GetIndex()] = ce.GetEndpoint()
+			continue
+		}
 		if e := resp.GetEntry(); e != nil {
-			aggregateCtEntry(stats.entries, e)
+			src, dst := resolvePeerEndpoints(peerEndpoints[pr.Peer], e)
+			aggregateCtEntry(stats.entries, e, src, dst, stats.endpoints)
 		}
 	}
 	stats.computedAt = time.Now()
 
 	return stats
+}
+
+// resolvePeerEndpoints resolves e's source/destination endpoint index
+// against peerEndpoints, the dictionary built from the ConntrackStatsEndpoint
+// messages sent so far by the peer that reported e. Either return value is
+// nil if e didn't reference an index, or the peer never sent a matching
+// ConntrackStatsEndpoint (which shouldn't happen for a well-behaved peer).
+func resolvePeerEndpoints(peerEndpoints map[uint32]*flowpb.Endpoint, e *observerpb.ConntrackStatsEntry) (src, dst *flowpb.Endpoint) {
+	if idx := e.GetSourceEndpointIndex(); idx != nil {
+		src = peerEndpoints[idx.GetValue()]
+	}
+	if idx := e.GetDestinationEndpointIndex(); idx != nil {
+		dst = peerEndpoints[idx.GetValue()]
+	}
+	return src, dst
 }
 
 func keyOf(k *observerpb.ConntrackStatsKey) ctKey {
@@ -186,38 +237,69 @@ func valueOf(val *observerpb.ConntrackStatsEntry) *ctValue {
 //   - Repeated observations of the same view (e.g. retries, or the same
 //     entry reported more than once): counters are reconciled by keeping
 //     the maximum value observed, not by summing them.
+//
+// src/dst are the source/destination Endpoint this particular val already
+// had resolved by its own peer, if any; whichever peer resolves them first
+// wins; once set on the aggregated entry, they are never overwritten by a
+// later, potentially unresolved, observation of the same connection.
 func aggregateCtEntry(
 	entries map[ctKey]*ctValue,
 	val *observerpb.ConntrackStatsEntry,
+	src, dst *flowpb.Endpoint,
+	dedup *hubbleconntrack.EndpointDedup,
 ) {
 	rawFlags := val.GetKey().GetFlags()
 	k := keyOf(val.GetKey())
 	e, ok := entries[k]
 	if !ok {
-		entries[k] = valueOf(val)
+		e = valueOf(val)
+		entries[k] = e
+		fillEndpointIndices(e, src, dst, dedup)
 		return
 	}
 
 	if e.flags&tupleFIn == 0 && rawFlags&tupleFIn != 0 {
 		// e is already the canonical view of this connection.
+		fillEndpointIndices(e, src, dst, dedup)
 		return
 	}
 	if e.flags&tupleFIn != 0 && rawFlags&tupleFIn == 0 {
-		// val is the canonical view instead.
-		entries[k] = valueOf(val)
+		// val is the canonical view instead. Keep data if already resolved.
+		newEntry := valueOf(val)
+		newEntry.srcEndpointIdx, newEntry.dstEndpointIdx = e.srcEndpointIdx, e.dstEndpointIdx
+		entries[k] = newEntry
+		fillEndpointIndices(newEntry, src, dst, dedup)
 		return
 	}
 
-	if val.GetValue().GetRxPackets() > e.rxPackets {
-		e.rxPackets = val.GetValue().GetRxPackets()
+	if x := val.GetValue().GetRxPackets(); x > e.rxPackets {
+		e.rxPackets = x
 	}
-	if val.GetValue().GetRxBytes() > e.rxBytes {
-		e.rxBytes = val.GetValue().GetRxBytes()
+	if x := val.GetValue().GetRxBytes(); x > e.rxBytes {
+		e.rxBytes = x
 	}
-	if val.GetValue().GetTxPackets() > e.txPackets {
-		e.txPackets = val.GetValue().GetTxPackets()
+	if x := val.GetValue().GetTxPackets(); x > e.txPackets {
+		e.txPackets = x
 	}
-	if val.GetValue().GetTxBytes() > e.txBytes {
-		e.txBytes = val.GetValue().GetTxBytes()
+	if x := val.GetValue().GetTxBytes(); x > e.txBytes {
+		e.txBytes = x
+	}
+	fillEndpointIndices(e, src, dst, dedup)
+}
+
+// fillEndpointIndices assigns e's source/destination endpoint index from
+// src/dst, but only if not already set: the first peer to resolve a given
+// connection's endpoint wins, and is never overwritten by a later,
+// potentially unresolved, observation of the same connection.
+func fillEndpointIndices(e *ctValue, src, dst *flowpb.Endpoint, dedup *hubbleconntrack.EndpointDedup) {
+	if e.srcEndpointIdx == nil {
+		if idx, ok := dedup.Index(src); ok {
+			e.srcEndpointIdx = &idx
+		}
+	}
+	if e.dstEndpointIdx == nil {
+		if idx, ok := dedup.Index(dst); ok {
+			e.dstEndpointIdx = &idx
+		}
 	}
 }

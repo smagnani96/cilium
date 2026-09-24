@@ -9,7 +9,12 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
+	flowpb "github.com/cilium/cilium/api/v1/flow"
+	observerpb "github.com/cilium/cilium/api/v1/observer"
+	resolverTypes "github.com/cilium/cilium/pkg/hubble/resolver/types"
+	"github.com/cilium/cilium/pkg/hubble/testutils"
 	"github.com/cilium/cilium/pkg/maps/ctmap"
 	"github.com/cilium/cilium/pkg/option"
 	"github.com/cilium/cilium/pkg/tuple"
@@ -28,7 +33,7 @@ func (m *mockCTStatsMaps) MaxEntries() int {
 }
 
 func TestConntrackExporter_Disabled(t *testing.T) {
-	c := newCTStatsExporter(Config{}, &option.DaemonConfig{BPFConntrackAccounting: false}, &mockCTStatsMaps{}, hivetest.Logger(t))
+	c := newCTStatsExporter(Config{}, &option.DaemonConfig{BPFConntrackAccounting: false}, &mockCTStatsMaps{}, hivetest.Logger(t), nil)
 	require.False(t, c.Enabled())
 	snap, err := c.GetConntrackStats(t.Context())
 	require.ErrorIs(t, err, ErrExporterDisabled)
@@ -36,7 +41,7 @@ func TestConntrackExporter_Disabled(t *testing.T) {
 }
 
 func TestConntrackExporter_Enabled(t *testing.T) {
-	c := newCTStatsExporter(Config{}, &option.DaemonConfig{BPFConntrackAccounting: true}, &mockCTStatsMaps{}, hivetest.Logger(t))
+	c := newCTStatsExporter(Config{}, &option.DaemonConfig{BPFConntrackAccounting: true}, &mockCTStatsMaps{}, hivetest.Logger(t), nil)
 	require.True(t, c.Enabled())
 	snap1, err := c.GetConntrackStats(t.Context())
 	require.NoError(t, err)
@@ -73,11 +78,11 @@ func TestCtStats_MergeInOutMirror(t *testing.T) {
 
 	outKey := newCtKey4("10.244.0.6", 40924, "10.244.1.151", 53, ctmap.TUPLE_F_OUT)
 	outValue := ctmap.StatsValues{{RxPackets: 1, RxBytes: 205, TxPackets: 1, TxBytes: 112}}
-	stats.merge(outKey, outValue)
+	stats.merge(outKey, outValue, nil)
 
 	inKey := newCtKey4("10.244.0.6", 40924, "10.244.1.151", 53, ctmap.TUPLE_F_IN)
 	inValue := ctmap.StatsValues{{RxPackets: 1, RxBytes: 112, TxPackets: 1, TxBytes: 205}}
-	stats.merge(inKey, inValue)
+	stats.merge(inKey, inValue, nil)
 
 	require.Len(t, stats.entries, 1)
 	var got *ctEntry
@@ -99,11 +104,11 @@ func TestCtStats_MergeInOutMirror_ReverseOrder(t *testing.T) {
 
 	inKey := newCtKey4("10.244.0.6", 40924, "10.244.1.151", 53, ctmap.TUPLE_F_IN)
 	inValue := ctmap.StatsValues{{RxPackets: 1, RxBytes: 112, TxPackets: 1, TxBytes: 205}}
-	stats.merge(inKey, inValue)
+	stats.merge(inKey, inValue, nil)
 
 	outKey := newCtKey4("10.244.0.6", 40924, "10.244.1.151", 53, ctmap.TUPLE_F_OUT)
 	outValue := ctmap.StatsValues{{RxPackets: 1, RxBytes: 205, TxPackets: 1, TxBytes: 112}}
-	stats.merge(outKey, outValue)
+	stats.merge(outKey, outValue, nil)
 
 	require.Len(t, stats.entries, 1)
 	var got *ctEntry
@@ -122,10 +127,45 @@ func TestCtStats_MergeKeepsServiceEntryDistinct(t *testing.T) {
 	stats := &ctStats{entries: make(map[mergeKey]*ctEntry)}
 
 	outKey := newCtKey4("10.244.0.6", 40924, "10.244.1.151", 53, ctmap.TUPLE_F_OUT)
-	stats.merge(outKey, ctmap.StatsValues{{RxPackets: 1, RxBytes: 205, TxPackets: 1, TxBytes: 112}})
+	stats.merge(outKey, ctmap.StatsValues{{RxPackets: 1, RxBytes: 205, TxPackets: 1, TxBytes: 112}}, nil)
 
 	svcKey := newCtKey4("10.244.0.6", 40924, "10.244.1.151", 53, ctmap.TUPLE_F_SERVICE)
-	stats.merge(svcKey, ctmap.StatsValues{{RxPackets: 1, RxBytes: 205, TxPackets: 1, TxBytes: 112}})
+	stats.merge(svcKey, ctmap.StatsValues{{RxPackets: 1, RxBytes: 205, TxPackets: 1, TxBytes: 112}}, nil)
 
 	require.Len(t, stats.entries, 2)
+}
+
+func TestCtStats_MergeResolvesAndDedupsEndpoints(t *testing.T) {
+	server := &flowpb.Endpoint{ID: 42, Namespace: "default", PodName: "server"}
+	epGetter := &testutils.FakeEndpointGetter{
+		OnResolveEndpoint: func(ip netip.Addr, _ uint32, _ resolverTypes.DatapathContext) *flowpb.Endpoint {
+			if ip.String() == "10.244.1.151" {
+				return server
+			}
+			return nil
+		},
+	}
+
+	stats := &ctStats{entries: make(map[mergeKey]*ctEntry), endpoints: NewEndpointDedup()}
+
+	firstKey := newCtKey4("10.244.0.6", 40924, "10.244.1.151", 53, ctmap.TUPLE_F_OUT)
+	stats.merge(firstKey, ctmap.StatsValues{{RxPackets: 1}}, epGetter)
+
+	secondKey := newCtKey4("10.244.0.7", 51000, "10.244.1.151", 53, ctmap.TUPLE_F_OUT)
+	stats.merge(secondKey, ctmap.StatsValues{{RxPackets: 1}}, epGetter)
+
+	require.Len(t, stats.entries, 2)
+
+	var endpoints []*observerpb.ConntrackStatsEndpoint
+	for e := range stats.Endpoints() {
+		endpoints = append(endpoints, e)
+	}
+	require.Len(t, endpoints, 1)
+	require.True(t, proto.Equal(server, endpoints[0].GetEndpoint()))
+
+	for _, e := range stats.entries {
+		require.Nil(t, e.srcEndpointIdx)
+		require.NotNil(t, e.dstEndpointIdx)
+		require.Equal(t, endpoints[0].GetIndex(), *e.dstEndpointIdx)
+	}
 }

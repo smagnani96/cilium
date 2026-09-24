@@ -277,6 +277,17 @@ func (s *LocalObserverServer) GetConntrackStats(
 		return err
 	}
 
+	// Endpoints are sent before the entries that reference them by index.
+	for ep := range snap.Endpoints() {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := server.Send(&observerpb.GetConntrackStatsResponse{
+			ResponseTypes: &observerpb.GetConntrackStatsResponse_Endpoint{Endpoint: ep}}); err != nil {
+			return err
+		}
+	}
+
 	for e := range snap.Entries() {
 		if err := ctx.Err(); err != nil {
 			return err

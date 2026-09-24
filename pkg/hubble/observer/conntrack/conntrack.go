@@ -14,6 +14,7 @@ import (
 
 	observerpb "github.com/cilium/cilium/api/v1/observer"
 	"github.com/cilium/cilium/pkg/hubble/observer/conntrack/types"
+	resolverTypes "github.com/cilium/cilium/pkg/hubble/resolver/types"
 	"github.com/cilium/cilium/pkg/maps/ctmap"
 	"github.com/cilium/cilium/pkg/option"
 	"github.com/cilium/cilium/pkg/u8proto"
@@ -28,6 +29,7 @@ type ctStatsExporter struct {
 	daemonCfg   *option.DaemonConfig
 	ctStatsMaps ctmap.StatsMaps
 	logger      *slog.Logger
+	epGetter    resolverTypes.EndpointGetter
 
 	stats   atomic.Pointer[ctStats]
 	refresh singleflight.Group
@@ -38,12 +40,14 @@ func newCTStatsExporter(
 	daemonCfg *option.DaemonConfig,
 	ctStatsMaps ctmap.StatsMaps,
 	log *slog.Logger,
+	epGetter resolverTypes.EndpointGetter,
 ) *ctStatsExporter {
 	return &ctStatsExporter{
 		cfg:         cfg,
 		daemonCfg:   daemonCfg,
 		ctStatsMaps: ctStatsMaps,
 		logger:      log,
+		epGetter:    epGetter,
 	}
 }
 
@@ -130,10 +134,13 @@ func newMergeKey(srcAddr, dstAddr netip.Addr, srcPort, dstPort uint16, protocol 
 }
 
 func (c *ctStatsExporter) dumpStats(ctx context.Context) (*ctStats, error) {
-	stats := &ctStats{entries: make(map[mergeKey]*ctEntry)}
+	stats := &ctStats{
+		entries:   make(map[mergeKey]*ctEntry),
+		endpoints: NewEndpointDedup(),
+	}
 
 	err := c.ctStatsMaps.DumpEntries(ctx, func(key ctmap.CtKey, value ctmap.StatsValues) bool {
-		stats.merge(key, value)
+		stats.merge(key, value, c.epGetter)
 		return true
 	})
 	if err != nil {
@@ -146,8 +153,10 @@ func (c *ctStatsExporter) dumpStats(ctx context.Context) (*ctStats, error) {
 // merge folds a raw conntrack map entry into the stats, collapsing
 // TUPLE_F_IN/TUPLE_F_OUT mirror pairs (see mergeKey) into a single
 // canonical (TUPLE_F_OUT) entry instead of keeping both or summing their
-// counters.
-func (c *ctStats) merge(key ctmap.CtKey, values ctmap.StatsValues) {
+// counters. While doing so, it resolves the source/destination Endpoint
+// (if epGetter is set) and records it in c.endpoints, so multiple entries
+// sharing the same resolved endpoint only pay for it once.
+func (c *ctStats) merge(key ctmap.CtKey, values ctmap.StatsValues, epGetter resolverTypes.EndpointGetter) {
 	srcAddr, dstAddr, srcPort, dstPort, protocol, flags, ok := ctKeyToTuple(key)
 	if !ok {
 		return
@@ -160,26 +169,44 @@ func (c *ctStats) merge(key ctmap.CtKey, values ctmap.StatsValues) {
 	}
 
 	c.entries[mk] = &ctEntry{
-		srcAddr:  srcAddr,
-		dstAddr:  dstAddr,
-		srcPort:  srcPort,
-		dstPort:  dstPort,
-		protocol: protocol,
-		flags:    flags,
-		value:    values.Aggregate(),
+		srcAddr:        srcAddr,
+		dstAddr:        dstAddr,
+		srcPort:        srcPort,
+		dstPort:        dstPort,
+		protocol:       protocol,
+		flags:          flags,
+		value:          values.Aggregate(),
+		srcEndpointIdx: resolveEndpointIndex(epGetter, c.endpoints, srcAddr),
+		dstEndpointIdx: resolveEndpointIndex(epGetter, c.endpoints, dstAddr),
 	}
 }
 
+// resolveEndpointIndex resolves addr's Endpoint (if epGetter is set) and
+// returns its index in dedup, or nil if resolution isn't possible or fails.
+func resolveEndpointIndex(epGetter resolverTypes.EndpointGetter, dedup *EndpointDedup, addr netip.Addr) *uint32 {
+	if epGetter == nil {
+		return nil
+	}
+	ep := epGetter.ResolveEndpoint(addr, 0, resolverTypes.DatapathContext{})
+	idx, ok := dedup.Index(ep)
+	if !ok {
+		return nil
+	}
+	return &idx
+}
+
 type ctEntry struct {
-	srcAddr, dstAddr netip.Addr
-	srcPort, dstPort uint16
-	protocol         u8proto.U8proto
-	flags            uint8
-	value            ctmap.StatsValue
+	srcAddr, dstAddr               netip.Addr
+	srcPort, dstPort               uint16
+	protocol                       u8proto.U8proto
+	flags                          uint8
+	value                          ctmap.StatsValue
+	srcEndpointIdx, dstEndpointIdx *uint32
 }
 
 type ctStats struct {
 	entries    map[mergeKey]*ctEntry
+	endpoints  *EndpointDedup
 	computedAt time.Time
 }
 
@@ -198,6 +225,13 @@ func (c *ctStats) Entries() iter.Seq[*observerpb.ConntrackStatsEntry] {
 	}
 }
 
+func (c *ctStats) Endpoints() iter.Seq[*observerpb.ConntrackStatsEndpoint] {
+	if c.endpoints == nil {
+		return func(func(*observerpb.ConntrackStatsEndpoint) bool) {}
+	}
+	return c.endpoints.Endpoints()
+}
+
 func CTEntryToProto(e *ctEntry) *observerpb.ConntrackStatsEntry {
 	return &observerpb.ConntrackStatsEntry{
 		Key: &observerpb.ConntrackStatsKey{
@@ -214,6 +248,8 @@ func CTEntryToProto(e *ctEntry) *observerpb.ConntrackStatsEntry {
 			RxBytes:   e.value.RxBytes,
 			TxBytes:   e.value.TxBytes,
 		},
+		SourceEndpointIndex:      Wrap(e.srcEndpointIdx),
+		DestinationEndpointIndex: Wrap(e.dstEndpointIdx),
 	}
 }
 

@@ -258,6 +258,15 @@ func (s *Server) GetConntrackStats(req *observerpb.GetConntrackStatsRequest, str
 		return err
 	}
 
+	// Endpoints are sent before the entries that reference them by index.
+	for ep := range stats.Endpoints() {
+		if err := stream.Send(&observerpb.GetConntrackStatsResponse{
+			ResponseTypes: &observerpb.GetConntrackStatsResponse_Endpoint{Endpoint: ep},
+		}); err != nil {
+			return err
+		}
+	}
+
 	for e := range stats.Entries() {
 		if err := stream.Send(&observerpb.GetConntrackStatsResponse{
 			ResponseTypes: &observerpb.GetConntrackStatsResponse_Entry{Entry: e},
@@ -281,7 +290,7 @@ func (s *Server) GetConntrackStats(req *observerpb.GetConntrackStatsRequest, str
 // is closed once every peer has been drained; the returned function reports
 // the first error encountered while fetching, if any, and must only be
 // called once the channel has been fully drained.
-func (s *Server) fetchConntrackSnapshots(ctx context.Context) (<-chan *observerpb.GetConntrackStatsResponse, func() error) {
+func (s *Server) fetchConntrackSnapshots(ctx context.Context) (<-chan *conntrack.PeerResponse, func() error) {
 	if md, ok := metadata.FromIncomingContext(ctx); ok {
 		ctx = metadata.NewOutgoingContext(ctx, md)
 	}
@@ -289,7 +298,7 @@ func (s *Server) fetchConntrackSnapshots(ctx context.Context) (<-chan *observerp
 
 	g, gctx := errgroup.WithContext(ctx)
 	peers := s.peers.List()
-	entries := make(chan *observerpb.GetConntrackStatsResponse, len(peers))
+	entries := make(chan *conntrack.PeerResponse, len(peers))
 	req := &observerpb.GetConntrackStatsRequest{}
 
 	for _, p := range peers {
@@ -312,7 +321,7 @@ func (s *Server) fetchConntrackSnapshots(ctx context.Context) (<-chan *observerp
 					logfields.Peer, p.Name,
 				)
 				select {
-				case entries <- conntrackNodeStatusError(err, p.Name):
+				case entries <- &conntrack.PeerResponse{Peer: p.Name, Response: conntrackNodeStatusError(err, p.Name)}:
 				case <-gctx.Done():
 				}
 				return nil
@@ -329,13 +338,13 @@ func (s *Server) fetchConntrackSnapshots(ctx context.Context) (<-chan *observerp
 						logfields.Peer, p.Name,
 					)
 					select {
-					case entries <- conntrackNodeStatusError(err, p.Name):
+					case entries <- &conntrack.PeerResponse{Peer: p.Name, Response: conntrackNodeStatusError(err, p.Name)}:
 					case <-gctx.Done():
 					}
 					return nil
 				}
 				select {
-				case entries <- resp:
+				case entries <- &conntrack.PeerResponse{Peer: p.Name, Response: resp}:
 				case <-gctx.Done():
 					return gctx.Err()
 				}

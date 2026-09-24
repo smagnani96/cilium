@@ -14,6 +14,7 @@ import (
 // Stats is the result of a single walk of the datapath conntrack stats maps.
 type Stats interface {
 	Entries() iter.Seq[*observerpb.ConntrackStatsEntry]
+	Endpoints() iter.Seq[*observerpb.ConntrackStatsEndpoint]
 	NodeStatuses() []*observerpb.GetConntrackStatsResponse
 }
 
@@ -22,6 +23,16 @@ type CTStatsExporter interface {
 	GetConntrackStats(ctx context.Context) (Stats, error)
 }
 
-func NewCTStatsExporter(cacheTTL time.Duration, fetch func(ctx context.Context) (<-chan *observerpb.GetConntrackStatsResponse, func() error)) CTStatsExporter {
+// PeerResponse pairs a GetConntrackStatsResponse with the name of the peer
+// that sent it. Peer identity is needed because a ConntrackStatsEntry's
+// source/destination endpoint index is only meaningful within the response
+// stream of the peer that assigned it: two different peers may each use
+// index 0 for entirely different resolved Endpoints.
+type PeerResponse struct {
+	Peer     string
+	Response *observerpb.GetConntrackStatsResponse
+}
+
+func NewCTStatsExporter(cacheTTL time.Duration, fetch func(ctx context.Context) (<-chan *PeerResponse, func() error)) CTStatsExporter {
 	return newCTStatsExporter(cacheTTL, fetch)
 }

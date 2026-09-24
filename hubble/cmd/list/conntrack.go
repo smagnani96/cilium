@@ -17,7 +17,9 @@ import (
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/types/known/wrapperspb"
 
+	flowpb "github.com/cilium/cilium/api/v1/flow"
 	observerpb "github.com/cilium/cilium/api/v1/observer"
 	"github.com/cilium/cilium/hubble/cmd/common/config"
 	"github.com/cilium/cilium/hubble/cmd/common/conn"
@@ -68,6 +70,8 @@ func runListCTStats(ctx context.Context, cmd *cobra.Command, conn *grpc.ClientCo
 		return err
 	}
 
+	endpoints := make(map[uint32]*flowpb.Endpoint)
+	var endpointList []*observerpb.ConntrackStatsEndpoint
 	var entries []*observerpb.ConntrackStatsEntry
 	for {
 		resp, err := stream.Recv()
@@ -79,6 +83,11 @@ func runListCTStats(ctx context.Context, cmd *cobra.Command, conn *grpc.ClientCo
 		}
 		if ns := resp.GetNodeStatus(); ns != nil {
 			fmt.Fprintf(cmd.ErrOrStderr(), "Error from node(s) %s: %s\n", strings.Join(ns.GetNodeNames(), ", "), ns.GetMessage())
+			continue
+		}
+		if ep := resp.GetEndpoint(); ep != nil {
+			endpoints[ep.GetIndex()] = ep.GetEndpoint()
+			endpointList = append(endpointList, ep)
 			continue
 		}
 		e := resp.GetEntry()
@@ -95,22 +104,28 @@ func runListCTStats(ctx context.Context, cmd *cobra.Command, conn *grpc.ClientCo
 
 	switch listOpts.output {
 	case "json":
-		return jsonOutput(cmd.OutOrStdout(), entries)
+		return jsonOutput(cmd.OutOrStdout(), &conntrackJSONOutput{Endpoints: endpointList, Entries: entries})
 	case "table":
-		return conntrackTableOutput(cmd.OutOrStdout(), entries)
+		return conntrackTableOutput(cmd.OutOrStdout(), entries, endpoints)
 	default:
 		return fmt.Errorf("unknown output format: %s", listOpts.output)
 	}
 }
 
-func conntrackTableOutput(buf io.Writer, entries []*observerpb.ConntrackStatsEntry) error {
+// conntrackJSONOutput is the JSON representation of a GetConntrackStats dump
+type conntrackJSONOutput struct {
+	Endpoints []*observerpb.ConntrackStatsEndpoint `json:"endpoints,omitempty"`
+	Entries   []*observerpb.ConntrackStatsEntry    `json:"entries"`
+}
+
+func conntrackTableOutput(buf io.Writer, entries []*observerpb.ConntrackStatsEntry, endpoints map[uint32]*flowpb.Endpoint) error {
 	tw := tabwriter.NewWriter(buf, 2, 0, 3, ' ', 0)
 	fmt.Fprint(tw, "SOURCE\tDESTINATION\tPROTO\tRX PACKETS\tTX PACKETS\tRX BYTES\tTX BYTES")
 	fmt.Fprintln(tw)
 	for _, v := range sortedEntries(entries) {
 		fmt.Fprint(tw,
-			fmt.Sprintf("%s:%d", v.GetKey().GetSourceIp(), v.GetKey().GetSourcePort()), "\t",
-			fmt.Sprintf("%s:%d", v.GetKey().GetDestinationIp(), v.GetKey().GetDestinationPort()), "\t",
+			formatAddr(v.GetKey().GetSourceIp(), v.GetKey().GetSourcePort(), resolveEndpoint(v.GetSourceEndpointIndex(), endpoints)), "\t",
+			formatAddr(v.GetKey().GetDestinationIp(), v.GetKey().GetDestinationPort(), resolveEndpoint(v.GetDestinationEndpointIndex(), endpoints)), "\t",
 			conntrackProtocolName(v.GetKey().GetProtocol()), "\t",
 			v.GetValue().GetRxPackets(), "\t",
 			v.GetValue().GetTxPackets(), "\t",
@@ -123,6 +138,44 @@ func conntrackTableOutput(buf io.Writer, entries []*observerpb.ConntrackStatsEnt
 		return err
 	}
 	return nil
+}
+
+// formatAddr formats an IP address and port, optionally including the resolved data.
+func formatAddr(ip string, port uint32, ep *flowpb.Endpoint) string {
+	ret := fmt.Sprintf("%s:%d", ip, port)
+	if ep != nil {
+		ret += " (" + formatEndpoint(ep) + ")"
+	}
+	return ret
+}
+
+// resolveEndpoint looks up idx (if set) in endpoints. A nil idx means the
+// server didn't resolve this side of the entry, and must not be confused
+// with a resolved index of 0.
+func resolveEndpoint(idx *wrapperspb.UInt32Value, endpoints map[uint32]*flowpb.Endpoint) *flowpb.Endpoint {
+	if idx == nil {
+		return nil
+	}
+	return endpoints[idx.GetValue()]
+}
+
+// formatEndpoint renders ep the same way "hubble observe" renders a flow
+// endpoint: namespace/pod name if known, else its reserved identity label,
+// else its numeric endpoint ID. Returns "" if ep is nil, i.e. resolution
+// failed or wasn't attempted.
+func formatEndpoint(ep *flowpb.Endpoint) string {
+	if ns, pod := ep.GetNamespace(), ep.GetPodName(); ns != "" && pod != "" {
+		return fmt.Sprintf("%s/%s", ns, pod)
+	}
+	for _, l := range ep.GetLabels() {
+		if strings.HasPrefix(l, "reserved:") {
+			return l
+		}
+	}
+	if id := ep.GetID(); id != 0 {
+		return fmt.Sprintf("ID:%d", id)
+	}
+	return ""
 }
 
 // conntrackProtocolName returns the protocol name for a given protocol number

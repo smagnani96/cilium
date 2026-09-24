@@ -13,6 +13,7 @@ import (
 // Stats is the result of a single walk of the datapath conntrack maps.
 type Stats interface {
 	Entries() iter.Seq[*observerpb.ConntrackStatsEntry]
+	Endpoints() iter.Seq[*observerpb.ConntrackStatsEndpoint]
 }
 
 // CTStatsExporter defines the interface for exporting conntrack stats.

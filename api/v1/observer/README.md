@@ -4,6 +4,7 @@
 ## Table of Contents
 
 - [observer/observer.proto](#observer_observer-proto)
+    - [ConntrackStatsEndpoint](#observer-ConntrackStatsEndpoint)
     - [ConntrackStatsEntry](#observer-ConntrackStatsEntry)
     - [ConntrackStatsKey](#observer-ConntrackStatsKey)
     - [ConntrackStatsValue](#observer-ConntrackStatsValue)
@@ -40,6 +41,24 @@
 
 
 
+<a name="observer-ConntrackStatsEndpoint"></a>
+
+### ConntrackStatsEndpoint
+ConntrackStatsEndpoint carries a single resolved source or destination
+flow.Endpoint referenced by one or more ConntrackStatsEntry messages, alongside
+the index they reference it by.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| index | [uint32](#uint32) |  |  |
+| endpoint | [flow.Endpoint](#flow-Endpoint) |  |  |
+
+
+
+
+
+
 <a name="observer-ConntrackStatsEntry"></a>
 
 ### ConntrackStatsEntry
@@ -50,6 +69,8 @@ ConntrackStatsEntry is an entry from a node&#39;s datapath conntrack map.
 | ----- | ---- | ----- | ----------- |
 | key | [ConntrackStatsKey](#observer-ConntrackStatsKey) |  |  |
 | value | [ConntrackStatsValue](#observer-ConntrackStatsValue) |  |  |
+| source_endpoint_index | [google.protobuf.UInt32Value](#google-protobuf-UInt32Value) |  | source_endpoint_index/destination_endpoint_index reference, by index, a ConntrackStatsEndpoint message carrying the resolved source/destination flow.Endpoint for this entry. They are unset if resolution failed. |
+| destination_endpoint_index | [google.protobuf.UInt32Value](#google-protobuf-UInt32Value) |  |  |
 
 
 
@@ -167,12 +188,16 @@ GetAgentEventsResponse contains an event received from the Cilium agent.
 ### GetConntrackStatsResponse
 GetConntrackStatsResponse streams the entries themselves, or a status update
 about the node. A header is always sent before the entries it applies to.
+Every ConntrackStatsEndpoint referenced by an entry&#39;s source_endpoint_index or
+destination_endpoint_index is guaranteed to have been sent earlier in the
+same response stream.
 
 
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
 | entry | [ConntrackStatsEntry](#observer-ConntrackStatsEntry) |  |  |
 | node_status | [relay.NodeStatusEvent](#relay-NodeStatusEvent) |  |  |
+| endpoint | [ConntrackStatsEndpoint](#observer-ConntrackStatsEndpoint) |  |  |
 
 
 
