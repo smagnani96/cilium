@@ -6,6 +6,7 @@ package conntrack
 import (
 	"context"
 	"iter"
+	"time"
 
 	observerpb "github.com/cilium/cilium/api/v1/observer"
 )
@@ -21,6 +22,6 @@ type CTStatsExporter interface {
 	GetConntrackStats(ctx context.Context) (Stats, error)
 }
 
-func NewCTStatsExporter(fetch func(ctx context.Context) (<-chan *observerpb.GetConntrackStatsResponse, func() error)) CTStatsExporter {
-	return newCTStatsExporter(fetch)
+func NewCTStatsExporter(cacheTTL time.Duration, fetch func(ctx context.Context) (<-chan *observerpb.GetConntrackStatsResponse, func() error)) CTStatsExporter {
+	return newCTStatsExporter(cacheTTL, fetch)
 }

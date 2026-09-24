@@ -6,8 +6,11 @@ package conntrack
 import (
 	"context"
 	"iter"
+	"sync/atomic"
+	"time"
 
 	observerpb "github.com/cilium/cilium/api/v1/observer"
+	"golang.org/x/sync/singleflight"
 )
 
 // tupleFIn mirrors ctmap.TUPLE_F_IN (pkg/maps/ctmap).
@@ -41,6 +44,7 @@ type ctValue struct {
 type ctStats struct {
 	entries      map[ctKey]*ctValue
 	nodeStatuses []*observerpb.GetConntrackStatsResponse
+	computedAt   time.Time
 }
 
 func (c *ctStats) Entries() iter.Seq[*observerpb.ConntrackStatsEntry] {
@@ -76,23 +80,56 @@ func (c *ctStats) NodeStatuses() []*observerpb.GetConntrackStatsResponse {
 // ctStatsExporter is responsible for exporting conntrack stats retrieved from multiple nodes.
 type ctStatsExporter struct {
 	fetch func(ctx context.Context) (<-chan *observerpb.GetConntrackStatsResponse, func() error)
+
+	stats    atomic.Pointer[ctStats]
+	refresh  singleflight.Group
+	cacheTTL time.Duration
 }
 
-func newCTStatsExporter(fetch func(ctx context.Context) (<-chan *observerpb.GetConntrackStatsResponse, func() error)) *ctStatsExporter {
-	return &ctStatsExporter{fetch: fetch}
+func newCTStatsExporter(cacheTTL time.Duration, fetch func(ctx context.Context) (<-chan *observerpb.GetConntrackStatsResponse, func() error)) *ctStatsExporter {
+	return &ctStatsExporter{fetch: fetch, cacheTTL: cacheTTL}
 }
 
 // GetConntrackStats returns the conntrack stats from all the nodes.
 // Responses are aggregated as they arrive rather than buffering all responses first.
 func (c *ctStatsExporter) GetConntrackStats(ctx context.Context) (Stats, error) {
-	responses, wait := c.fetch(ctx)
-
-	stats := mergeConntrackResponses(responses)
-	if err := wait(); err != nil {
-		return nil, err
+	if stats := c.cachedStats(); stats != nil {
+		return stats, nil
 	}
 
-	return stats, nil
+	v, err, _ := c.refresh.Do("", func() (any, error) {
+		// Someone else may have refreshed it between our check above and
+		// winning the singleflight call.
+		if stats := c.cachedStats(); stats != nil {
+			return stats, nil
+		}
+
+		responses, wait := c.fetch(ctx)
+		stats := mergeConntrackResponses(responses)
+		if err := wait(); err != nil {
+			return nil, err
+		}
+
+		// Don't cache a result where every peer failed.
+		allFailed := len(responses) > 0 && len(stats.nodeStatuses) == len(responses)
+		if !allFailed {
+			c.stats.Store(stats)
+		}
+		return stats, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return v.(*ctStats), nil
+}
+
+// cachedStats returns the cached stats if it is still valid.
+func (c *ctStatsExporter) cachedStats() *ctStats {
+	e := c.stats.Load()
+	if e != nil && time.Since(e.computedAt) < c.cacheTTL {
+		return e
+	}
+	return nil
 }
 
 // mergeConntrackResponses consumes every peer's GetConntrackStats responses
@@ -114,6 +151,7 @@ func mergeConntrackResponses(responses <-chan *observerpb.GetConntrackStatsRespo
 			aggregateCtEntry(stats.entries, e)
 		}
 	}
+	stats.computedAt = time.Now()
 
 	return stats
 }

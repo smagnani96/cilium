@@ -28,7 +28,7 @@ func (m *mockCTStatsMaps) MaxEntries() int {
 }
 
 func TestConntrackExporter_Disabled(t *testing.T) {
-	c := newCTStatsExporter(&option.DaemonConfig{BPFConntrackAccounting: false}, &mockCTStatsMaps{}, hivetest.Logger(t))
+	c := newCTStatsExporter(Config{}, &option.DaemonConfig{BPFConntrackAccounting: false}, &mockCTStatsMaps{}, hivetest.Logger(t))
 	require.False(t, c.Enabled())
 	snap, err := c.GetConntrackStats(t.Context())
 	require.ErrorIs(t, err, ErrExporterDisabled)
@@ -36,7 +36,7 @@ func TestConntrackExporter_Disabled(t *testing.T) {
 }
 
 func TestConntrackExporter_Enabled(t *testing.T) {
-	c := newCTStatsExporter(&option.DaemonConfig{BPFConntrackAccounting: true}, &mockCTStatsMaps{}, hivetest.Logger(t))
+	c := newCTStatsExporter(Config{}, &option.DaemonConfig{BPFConntrackAccounting: true}, &mockCTStatsMaps{}, hivetest.Logger(t))
 	require.True(t, c.Enabled())
 	snap1, err := c.GetConntrackStats(t.Context())
 	require.NoError(t, err)

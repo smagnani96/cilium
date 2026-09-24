@@ -9,29 +9,38 @@ import (
 	"iter"
 	"log/slog"
 	"net/netip"
+	"sync/atomic"
+	"time"
 
 	observerpb "github.com/cilium/cilium/api/v1/observer"
 	"github.com/cilium/cilium/pkg/hubble/observer/conntrack/types"
 	"github.com/cilium/cilium/pkg/maps/ctmap"
 	"github.com/cilium/cilium/pkg/option"
 	"github.com/cilium/cilium/pkg/u8proto"
+	"golang.org/x/sync/singleflight"
 )
 
 var ErrExporterDisabled = errors.New("conntrack stats exporter is disabled")
 
 // ctStatsExporter is responsible for exporting conntrack stats from the datapath.
 type ctStatsExporter struct {
+	cfg         Config
 	daemonCfg   *option.DaemonConfig
 	ctStatsMaps ctmap.StatsMaps
 	logger      *slog.Logger
+
+	stats   atomic.Pointer[ctStats]
+	refresh singleflight.Group
 }
 
 func newCTStatsExporter(
+	cfg Config,
 	daemonCfg *option.DaemonConfig,
 	ctStatsMaps ctmap.StatsMaps,
 	log *slog.Logger,
 ) *ctStatsExporter {
 	return &ctStatsExporter{
+		cfg:         cfg,
 		daemonCfg:   daemonCfg,
 		ctStatsMaps: ctStatsMaps,
 		logger:      log,
@@ -47,7 +56,40 @@ func (c *ctStatsExporter) GetConntrackStats(ctx context.Context) (types.Stats, e
 	if !c.Enabled() {
 		return nil, ErrExporterDisabled
 	}
-	return c.dumpStats(ctx)
+	if stats := c.cachedStats(); stats != nil {
+		return stats, nil
+	}
+
+	v, err, _ := c.refresh.Do("", func() (any, error) {
+		// Someone else may have refreshed it between our check above and
+		// winning the singleflight call.
+		if stats := c.cachedStats(); stats != nil {
+			return stats, nil
+		}
+
+		stats, err := c.dumpStats(ctx)
+		if err != nil {
+			return nil, err
+		}
+		// Don't cache a result where no stats have been retrieved.
+		if len(stats.entries) > 0 {
+			c.stats.Store(stats)
+		}
+		return stats, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return v.(*ctStats), nil
+}
+
+// cachedStats returns the cached stats if it is still valid.
+func (c *ctStatsExporter) cachedStats() *ctStats {
+	stats := c.stats.Load()
+	if stats != nil && time.Since(stats.computedAt) < c.cfg.ConntrackCacheTTL {
+		return stats
+	}
+	return nil
 }
 
 // mergeKey identifies the logical connection a conntrack entry belongs to,
@@ -97,7 +139,7 @@ func (c *ctStatsExporter) dumpStats(ctx context.Context) (*ctStats, error) {
 	if err != nil {
 		return nil, err
 	}
-
+	stats.computedAt = time.Now()
 	return stats, nil
 }
 
@@ -137,7 +179,8 @@ type ctEntry struct {
 }
 
 type ctStats struct {
-	entries map[mergeKey]*ctEntry
+	entries    map[mergeKey]*ctEntry
+	computedAt time.Time
 }
 
 // Entries lazily yields one ConntrackStatsEntry per merged connection: it does
