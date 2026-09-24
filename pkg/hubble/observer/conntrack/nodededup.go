@@ -33,6 +33,13 @@ type nodeKey struct {
 	name, cluster string
 }
 
+// nodeKeyOf mirrors keyOf (see endpointdedup.go), for callers holding a
+// *observerpb.ConntrackStatsNode (the wire representation) rather than a
+// *resolverTypes.ResolvedNode.
+func nodeKeyOf(n *observerpb.ConntrackStatsNode) nodeKey {
+	return nodeKey{name: n.GetName(), cluster: n.GetCluster()}
+}
+
 // Index returns the index n is assigned in the dedup table, allocating a
 // new one the first time this node's value is seen. ok is false if n is
 // nil, in which case idx is meaningless.

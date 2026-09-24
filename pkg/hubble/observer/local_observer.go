@@ -23,6 +23,7 @@ import (
 	"github.com/cilium/cilium/pkg/hubble/build"
 	"github.com/cilium/cilium/pkg/hubble/container"
 	"github.com/cilium/cilium/pkg/hubble/filters"
+	"github.com/cilium/cilium/pkg/hubble/observer/conntrack"
 	ctTypes "github.com/cilium/cilium/pkg/hubble/observer/conntrack/types"
 	"github.com/cilium/cilium/pkg/hubble/observer/namespace"
 	"github.com/cilium/cilium/pkg/hubble/observer/observeroption"
@@ -276,9 +277,10 @@ func (s *LocalObserverServer) GetConntrackStats(
 	if err != nil {
 		return err
 	}
+	view := conntrack.Aggregate(conntrack.Filter(snap, req.GetFilter()), req.GetGroupBy())
 
 	// Endpoints and nodes are sent before the entries that reference them by index.
-	for ep := range snap.Endpoints() {
+	for ep := range view.Endpoints() {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -288,7 +290,7 @@ func (s *LocalObserverServer) GetConntrackStats(
 		}
 	}
 
-	for n := range snap.Nodes() {
+	for n := range view.Nodes() {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -298,7 +300,7 @@ func (s *LocalObserverServer) GetConntrackStats(
 		}
 	}
 
-	for e := range snap.Entries() {
+	for e := range view.Entries() {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
