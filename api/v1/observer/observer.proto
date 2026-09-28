@@ -284,7 +284,68 @@ message Namespace {
   string namespace = 2;
 }
 
+// ConntrackAggregationField selects one field to keep distinct when
+// GetConntrackStatsRequest.group_by requests server-side aggregation.
+enum ConntrackAggregationField {
+    CONNTRACK_AGGREGATION_FIELD_UNKNOWN = 0;
+    CONNTRACK_AGGREGATION_FIELD_SOURCE_IP = 1;
+    CONNTRACK_AGGREGATION_FIELD_SOURCE_PORT = 2;
+    CONNTRACK_AGGREGATION_FIELD_DESTINATION_IP = 3;
+    CONNTRACK_AGGREGATION_FIELD_DESTINATION_PORT = 4;
+    CONNTRACK_AGGREGATION_FIELD_PROTOCOL = 5;
+    // The following values group by the *resolved* source/destination Endpoint
+    // or node identity instead of the raw source/destination IP. Entries whose
+    // corresponding side didn't resolve to an Endpoint or node are grouped
+    // together into a single "unresolved" bucket rather than dropped.
+    CONNTRACK_AGGREGATION_FIELD_SOURCE_ENDPOINT = 6;
+    CONNTRACK_AGGREGATION_FIELD_DESTINATION_ENDPOINT = 7;
+    CONNTRACK_AGGREGATION_FIELD_SOURCE_NODE = 8;
+    CONNTRACK_AGGREGATION_FIELD_DESTINATION_NODE = 9;
+}
+
+// ConntrackFilter narrows down a GetConntrackStats response to only the
+// entries that match every field it sets: a repeated field matches if the
+// entry's corresponding value equals any one of the listed values (i.e. an
+// OR across a field's own values, an AND across different fields). Unset
+// (empty) fields impose no constraint. Filtering is applied before
+// aggregation, so group_by only ever sums entries that already passed the
+// filter.
+message ConntrackFilter {
+    // source_ip/destination_ip match either an exact address (e.g.
+    // "10.0.0.1") or a CIDR range (e.g. "10.0.0.0/24").
+    repeated string source_ip = 1;
+    repeated string destination_ip = 2;
+    repeated uint32 source_port = 3;
+    repeated uint32 destination_port = 4;
+    repeated uint32 protocol = 5;
+
+    // source_endpoint/destination_endpoint match the resolved
+    // source/destination Endpoint's namespace and name, using the same
+    // "[<namespace>/]<name-prefix>". Namespace, if given, must match exactly,
+    // and name, if given, is matched as a prefix. An entry whose corresponding
+    // side didn't resolve to an Endpoint never matches.
+    repeated string source_endpoint = 6;
+    repeated string destination_endpoint = 7;
+
+    // source_node/destination_node match the resolved source/destination
+    // node's name exactly using the convention "[cluster/]<name-prefix>".
+    // An entry whose corresponding side didn't resolve to a node never matches.
+    repeated string source_node = 8;
+    repeated string destination_node = 9;
+}
+
 message GetConntrackStatsRequest {
+    // group_by, if non-empty, aggregates entries server-side before they are
+    // streamed back: entries that agree on every field listed here are
+    // merged into a single ConntrackStatsEntry with summed counters, and every
+    // field *not* listed is cleared. Aggregation is computed fresh for each
+    // request from the underlying cached stats.
+    repeated ConntrackAggregationField group_by = 1;
+
+    // filter, if set, drops every entry that doesn't match it before
+    // group_by is applied. As with group_by, filtering is applied fresh for
+    // each request against the underlying cached stats.
+    ConntrackFilter filter = 2;
 }
 
 // GetConntrackStatsResponse streams the entries themselves, or a status update
@@ -344,6 +405,8 @@ message ConntrackStatsEntry {
     // for this entry. They are unset if resolution failed.
     google.protobuf.UInt32Value source_node_index = 5;
     google.protobuf.UInt32Value destination_node_index = 6;
+
+    uint64 count = 7;
 }
 
 // ConntrackStatsEndpoint carries a single resolved source or destination

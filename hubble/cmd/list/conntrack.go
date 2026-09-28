@@ -27,6 +27,30 @@ import (
 	"github.com/cilium/cilium/pkg/u8proto"
 )
 
+var ctStatsOpts struct {
+	groupBy []string
+
+	sourceIP, destinationIP             []string
+	sourcePort, destinationPort         []uint
+	protocol                            []string
+	sourceEndpoint, destinationEndpoint []string
+	sourceNode, destinationNode         []string
+}
+
+// groupByFields maps the --group-by flag's user-facing names to the proto
+// enum values they select.
+var groupByFields = map[string]observerpb.ConntrackAggregationField{
+	"source-ip":            observerpb.ConntrackAggregationField_CONNTRACK_AGGREGATION_FIELD_SOURCE_IP,
+	"source-port":          observerpb.ConntrackAggregationField_CONNTRACK_AGGREGATION_FIELD_SOURCE_PORT,
+	"destination-ip":       observerpb.ConntrackAggregationField_CONNTRACK_AGGREGATION_FIELD_DESTINATION_IP,
+	"destination-port":     observerpb.ConntrackAggregationField_CONNTRACK_AGGREGATION_FIELD_DESTINATION_PORT,
+	"protocol":             observerpb.ConntrackAggregationField_CONNTRACK_AGGREGATION_FIELD_PROTOCOL,
+	"source-endpoint":      observerpb.ConntrackAggregationField_CONNTRACK_AGGREGATION_FIELD_SOURCE_ENDPOINT,
+	"destination-endpoint": observerpb.ConntrackAggregationField_CONNTRACK_AGGREGATION_FIELD_DESTINATION_ENDPOINT,
+	"source-node":          observerpb.ConntrackAggregationField_CONNTRACK_AGGREGATION_FIELD_SOURCE_NODE,
+	"destination-node":     observerpb.ConntrackAggregationField_CONNTRACK_AGGREGATION_FIELD_DESTINATION_NODE,
+}
+
 func newCTStatsCommand(vp *viper.Viper) *cobra.Command {
 	conntrackCmd := &cobra.Command{
 		Use:   "conntrack",
@@ -52,19 +76,137 @@ func newCTStatsCommand(vp *viper.Viper) *cobra.Command {
  table:    Tab-aligned columns`)
 	conntrackCmd.Flags().AddFlagSet(formattingFlags)
 
+	aggregateFlags := pflag.NewFlagSet("Aggregation", pflag.ContinueOnError)
+	aggregateFlags.StringSliceVar(
+		&ctStatsOpts.groupBy, "group-by", nil,
+		fmt.Sprintf(`Aggregate entries server-side by the specified fields.
+If unset, every distinct connection is listed individually.
+One or more of: %s`, strings.Join(groupByChoices(), ", ")))
+	conntrackCmd.Flags().AddFlagSet(aggregateFlags)
+
+	filterFlags := pflag.NewFlagSet("Filtering", pflag.ContinueOnError)
+	filterFlags.StringSliceVar(&ctStatsOpts.sourceIP, "source-ip", nil,
+		"Show only entries matching this source IP or CIDR (may be repeated)")
+	filterFlags.StringSliceVar(&ctStatsOpts.destinationIP, "destination-ip", nil,
+		"Show only entries matching this destination IP or CIDR (may be repeated)")
+	filterFlags.UintSliceVar(&ctStatsOpts.sourcePort, "source-port", nil,
+		"Show only entries matching this source port (may be repeated)")
+	filterFlags.UintSliceVar(&ctStatsOpts.destinationPort, "destination-port", nil,
+		"Show only entries matching this destination port (may be repeated)")
+	filterFlags.StringSliceVar(&ctStatsOpts.protocol, "protocol", nil,
+		"Show only entries matching this protocol, e.g. tcp, udp, icmp (may be repeated)")
+	filterFlags.StringSliceVar(&ctStatsOpts.sourceEndpoint, "source-endpoint", nil,
+		`Show only entries whose resolved source endpoint matches this
+"[<namespace>/]<pod-name-prefix>" (may be repeated)`)
+	filterFlags.StringSliceVar(&ctStatsOpts.destinationEndpoint, "destination-endpoint", nil,
+		`Show only entries whose resolved destination endpoint matches this
+"[<namespace>/]<pod-name-prefix>" (may be repeated)`)
+	filterFlags.StringSliceVar(&ctStatsOpts.sourceNode, "source-node", nil,
+		`Show only entries whose resolved source node matches this
+"[<cluster>/]<node-name-prefix>" (may be repeated)`)
+	filterFlags.StringSliceVar(&ctStatsOpts.destinationNode, "destination-node", nil,
+		`Show only entries whose resolved destination node matches this
+"[<cluster>/]<node-name-prefix>" (may be repeated)`)
+	conntrackCmd.Flags().AddFlagSet(filterFlags)
+
 	conntrackCmd.RegisterFlagCompletionFunc("output", func(_ *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
 		return []string{
 			"json",
 			"table",
 		}, cobra.ShellCompDirectiveDefault
 	})
+	conntrackCmd.RegisterFlagCompletionFunc("group-by", func(_ *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
+		return groupByChoices(), cobra.ShellCompDirectiveDefault
+	})
 
-	template.RegisterFlagSets(conntrackCmd, formattingFlags, config.ServerFlags)
+	template.RegisterFlagSets(conntrackCmd, formattingFlags, aggregateFlags, filterFlags, config.ServerFlags)
 	return conntrackCmd
 }
 
+func groupByChoices() []string {
+	choices := make([]string, 0, len(groupByFields))
+	for name := range groupByFields {
+		choices = append(choices, name)
+	}
+	sort.Strings(choices)
+	return choices
+}
+
+// uint32Slice converts a []uint (pflag's UintSlice element type) into
+// []uint32, the type ConntrackFilter's port fields use on the wire.
+func uint32Slice(vs []uint) []uint32 {
+	out := make([]uint32, len(vs))
+	for i, v := range vs {
+		out[i] = uint32(v)
+	}
+	return out
+}
+
+// parseProtocols converts a list of protocol names (e.g. "tcp", "udp",
+// case-insensitive) into their wire protocol numbers.
+func parseProtocols(names []string) ([]uint32, error) {
+	protocols := make([]uint32, 0, len(names))
+	for _, name := range names {
+		p, err := u8proto.ParseProtocol(name)
+		if err != nil {
+			return nil, fmt.Errorf("invalid --protocol value %q: %w", name, err)
+		}
+		protocols = append(protocols, uint32(p))
+	}
+	return protocols, nil
+}
+
+// buildConntrackFilter builds a *observerpb.ConntrackFilter from listOpts'
+// filter flags, or nil if none of them were set.
+func buildConntrackFilter() (*observerpb.ConntrackFilter, error) {
+	protocols, err := parseProtocols(ctStatsOpts.protocol)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(ctStatsOpts.sourceIP) == 0 && len(ctStatsOpts.destinationIP) == 0 &&
+		len(ctStatsOpts.sourcePort) == 0 && len(ctStatsOpts.destinationPort) == 0 &&
+		len(protocols) == 0 &&
+		len(ctStatsOpts.sourceEndpoint) == 0 && len(ctStatsOpts.destinationEndpoint) == 0 &&
+		len(ctStatsOpts.sourceNode) == 0 && len(ctStatsOpts.destinationNode) == 0 {
+		return nil, nil
+	}
+
+	return &observerpb.ConntrackFilter{
+		SourceIp:            ctStatsOpts.sourceIP,
+		DestinationIp:       ctStatsOpts.destinationIP,
+		SourcePort:          uint32Slice(ctStatsOpts.sourcePort),
+		DestinationPort:     uint32Slice(ctStatsOpts.destinationPort),
+		Protocol:            protocols,
+		SourceEndpoint:      ctStatsOpts.sourceEndpoint,
+		DestinationEndpoint: ctStatsOpts.destinationEndpoint,
+		SourceNode:          ctStatsOpts.sourceNode,
+		DestinationNode:     ctStatsOpts.destinationNode,
+	}, nil
+}
+
+func parseGroupBy(names []string) ([]observerpb.ConntrackAggregationField, error) {
+	fields := make([]observerpb.ConntrackAggregationField, 0, len(names))
+	for _, name := range names {
+		field, ok := groupByFields[name]
+		if !ok {
+			return nil, fmt.Errorf("unknown --group-by value %q, must be one of: %s", name, strings.Join(groupByChoices(), ", "))
+		}
+		fields = append(fields, field)
+	}
+	return fields, nil
+}
+
 func runListCTStats(ctx context.Context, cmd *cobra.Command, conn *grpc.ClientConn) error {
-	req := &observerpb.GetConntrackStatsRequest{}
+	groupBy, err := parseGroupBy(ctStatsOpts.groupBy)
+	if err != nil {
+		return err
+	}
+	filter, err := buildConntrackFilter()
+	if err != nil {
+		return err
+	}
+	req := &observerpb.GetConntrackStatsRequest{GroupBy: groupBy, Filter: filter}
 	stream, err := observerpb.NewObserverClient(conn).GetConntrackStats(ctx, req)
 	if err != nil {
 		return err
@@ -128,7 +270,7 @@ type conntrackJSONOutput struct {
 
 func conntrackTableOutput(buf io.Writer, entries []*observerpb.ConntrackStatsEntry, endpoints map[uint32]*flowpb.Endpoint, nodes map[uint32]*observerpb.ConntrackStatsNode) error {
 	tw := tabwriter.NewWriter(buf, 2, 0, 3, ' ', 0)
-	fmt.Fprint(tw, "SOURCE\tDESTINATION\tPROTO\tRX PACKETS\tTX PACKETS\tRX BYTES\tTX BYTES")
+	fmt.Fprint(tw, "SOURCE\tDESTINATION\tPROTO\tRX PACKETS\tTX PACKETS\tRX BYTES\tTX BYTES\tCOUNT")
 	fmt.Fprintln(tw)
 	for _, v := range sortedEntries(entries) {
 		fmt.Fprint(tw,
@@ -139,6 +281,7 @@ func conntrackTableOutput(buf io.Writer, entries []*observerpb.ConntrackStatsEnt
 			v.GetValue().GetTxPackets(), "\t",
 			v.GetValue().GetRxBytes(), "\t",
 			v.GetValue().GetTxBytes(), "\t",
+			v.GetCount(), "\t",
 		)
 		fmt.Fprintln(tw)
 	}
@@ -216,6 +359,19 @@ func conntrackProtocolName(protocol uint32) string {
 	return fmt.Sprintf("%d", protocol)
 }
 
+// compareIP orders two ConntrackStatsKey source/destination IP strings
+// numerically when both are valid addresses (IPv4 before IPv6), or
+// lexically otherwise: aggregation can clear a key's IP down to "" when the
+// caller didn't group by it, and that's not a parseable address.
+func compareIP(a, b string) int {
+	addrA, errA := netip.ParseAddr(a)
+	addrB, errB := netip.ParseAddr(b)
+	if errA != nil || errB != nil {
+		return strings.Compare(a, b)
+	}
+	return addrA.Compare(addrB)
+}
+
 // sortedEntries sorts conntrack entries by protocol order (TCP, UDP, ICMP,
 // ICMPv6, then anything else), then by source IP, then by destination
 // IP:port (IPv4 addresses sort before IPv6 throughout).
@@ -240,12 +396,10 @@ func sortedEntries(entries []*observerpb.ConntrackStatsEntry) []*observerpb.Conn
 		if pi != pj {
 			return pi < pj
 		}
-		srcI, srcJ := netip.MustParseAddr(entries[i].GetKey().GetSourceIp()), netip.MustParseAddr(entries[j].GetKey().GetSourceIp())
-		if c := srcI.Compare(srcJ); c != 0 {
+		if c := compareIP(entries[i].GetKey().GetSourceIp(), entries[j].GetKey().GetSourceIp()); c != 0 {
 			return c < 0
 		}
-		dstI, dstJ := netip.MustParseAddr(entries[i].GetKey().GetDestinationIp()), netip.MustParseAddr(entries[j].GetKey().GetDestinationIp())
-		if c := dstI.Compare(dstJ); c != 0 {
+		if c := compareIP(entries[i].GetKey().GetDestinationIp(), entries[j].GetKey().GetDestinationIp()); c != 0 {
 			return c < 0
 		}
 		return entries[i].GetKey().GetDestinationPort() < entries[j].GetKey().GetDestinationPort()

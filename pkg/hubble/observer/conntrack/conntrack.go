@@ -295,6 +295,7 @@ func CTEntryToProto(e *ctEntry) *observerpb.ConntrackStatsEntry {
 		DestinationEndpointIndex: Wrap(e.dstEndpointIdx),
 		SourceNodeIndex:          Wrap(e.srcNodeIdx),
 		DestinationNodeIndex:     Wrap(e.dstNodeIdx),
+		Count:                    1,
 	}
 }
 

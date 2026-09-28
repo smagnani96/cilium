@@ -4,6 +4,7 @@
 ## Table of Contents
 
 - [observer/observer.proto](#observer_observer-proto)
+    - [ConntrackFilter](#observer-ConntrackFilter)
     - [ConntrackStatsEndpoint](#observer-ConntrackStatsEndpoint)
     - [ConntrackStatsEntry](#observer-ConntrackStatsEntry)
     - [ConntrackStatsKey](#observer-ConntrackStatsKey)
@@ -29,6 +30,8 @@
     - [ServerStatusResponse](#observer-ServerStatusResponse)
     - [TLS](#observer-TLS)
   
+    - [ConntrackAggregationField](#observer-ConntrackAggregationField)
+  
     - [Observer](#observer-Observer)
   
 - [Scalar Value Types](#scalar-value-types)
@@ -39,6 +42,35 @@
 <p align="right"><a href="#top">Top</a></p>
 
 ## observer/observer.proto
+
+
+
+<a name="observer-ConntrackFilter"></a>
+
+### ConntrackFilter
+ConntrackFilter narrows down a GetConntrackStats response to only the
+entries that match every field it sets: a repeated field matches if the
+entry&#39;s corresponding value equals any one of the listed values (i.e. an
+OR across a field&#39;s own values, an AND across different fields). Unset
+(empty) fields impose no constraint. Filtering is applied before
+aggregation, so group_by only ever sums entries that already passed the
+filter.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| source_ip | [string](#string) | repeated | source_ip/destination_ip match either an exact address (e.g. &#34;10.0.0.1&#34;) or a CIDR range (e.g. &#34;10.0.0.0/24&#34;). |
+| destination_ip | [string](#string) | repeated |  |
+| source_port | [uint32](#uint32) | repeated |  |
+| destination_port | [uint32](#uint32) | repeated |  |
+| protocol | [uint32](#uint32) | repeated |  |
+| source_endpoint | [string](#string) | repeated | source_endpoint/destination_endpoint match the resolved source/destination Endpoint&#39;s namespace and name, using the same &#34;[&lt;namespace&gt;/]&lt;name-prefix&gt;&#34;. Namespace, if given, must match exactly, and name, if given, is matched as a prefix. An entry whose corresponding side didn&#39;t resolve to an Endpoint never matches. |
+| destination_endpoint | [string](#string) | repeated |  |
+| source_node | [string](#string) | repeated | source_node/destination_node match the resolved source/destination node&#39;s name exactly using the convention &#34;[cluster/]&lt;name-prefix&gt;&#34;. An entry whose corresponding side didn&#39;t resolve to a node never matches. |
+| destination_node | [string](#string) | repeated |  |
+
+
+
 
 
 
@@ -74,6 +106,7 @@ ConntrackStatsEntry is an entry from a node&#39;s datapath conntrack map.
 | destination_endpoint_index | [google.protobuf.UInt32Value](#google-protobuf-UInt32Value) |  |  |
 | source_node_index | [google.protobuf.UInt32Value](#google-protobuf-UInt32Value) |  | source_node_index/destination_node_index reference, by index, a ConntrackStatsNode message carrying the resolved source/destination node for this entry. They are unset if resolution failed. |
 | destination_node_index | [google.protobuf.UInt32Value](#google-protobuf-UInt32Value) |  |  |
+| count | [uint64](#uint64) |  |  |
 
 
 
@@ -200,6 +233,12 @@ GetAgentEventsResponse contains an event received from the Cilium agent.
 
 ### GetConntrackStatsRequest
 
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| group_by | [ConntrackAggregationField](#observer-ConntrackAggregationField) | repeated | group_by, if non-empty, aggregates entries server-side before they are streamed back: entries that agree on every field listed here are merged into a single ConntrackStatsEntry with summed counters, and every field *not* listed is cleared. Aggregation is computed fresh for each request from the underlying cached stats. |
+| filter | [ConntrackFilter](#observer-ConntrackFilter) |  | filter, if set, drops every entry that doesn&#39;t match it before group_by is applied. As with group_by, filtering is applied fresh for each request against the underlying cached stats. |
 
 
 
@@ -457,6 +496,27 @@ TLS represents TLS information.
 
 
  
+
+
+<a name="observer-ConntrackAggregationField"></a>
+
+### ConntrackAggregationField
+ConntrackAggregationField selects one field to keep distinct when
+GetConntrackStatsRequest.group_by requests server-side aggregation.
+
+| Name | Number | Description |
+| ---- | ------ | ----------- |
+| CONNTRACK_AGGREGATION_FIELD_UNKNOWN | 0 |  |
+| CONNTRACK_AGGREGATION_FIELD_SOURCE_IP | 1 |  |
+| CONNTRACK_AGGREGATION_FIELD_SOURCE_PORT | 2 |  |
+| CONNTRACK_AGGREGATION_FIELD_DESTINATION_IP | 3 |  |
+| CONNTRACK_AGGREGATION_FIELD_DESTINATION_PORT | 4 |  |
+| CONNTRACK_AGGREGATION_FIELD_PROTOCOL | 5 |  |
+| CONNTRACK_AGGREGATION_FIELD_SOURCE_ENDPOINT | 6 | The following values group by the *resolved* source/destination Endpoint or node identity instead of the raw source/destination IP. Entries whose corresponding side didn&#39;t resolve to an Endpoint or node are grouped together into a single &#34;unresolved&#34; bucket rather than dropped. |
+| CONNTRACK_AGGREGATION_FIELD_DESTINATION_ENDPOINT | 7 |  |
+| CONNTRACK_AGGREGATION_FIELD_SOURCE_NODE | 8 |  |
+| CONNTRACK_AGGREGATION_FIELD_DESTINATION_NODE | 9 |  |
+
 
  
 

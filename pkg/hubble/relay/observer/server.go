@@ -18,6 +18,7 @@ import (
 	observerpb "github.com/cilium/cilium/api/v1/observer"
 	relaypb "github.com/cilium/cilium/api/v1/relay"
 	"github.com/cilium/cilium/pkg/hubble/build"
+	hubbleconntrack "github.com/cilium/cilium/pkg/hubble/observer/conntrack"
 	"github.com/cilium/cilium/pkg/hubble/observer/namespace"
 	"github.com/cilium/cilium/pkg/hubble/relay/observer/conntrack"
 	poolTypes "github.com/cilium/cilium/pkg/hubble/relay/pool/types"
@@ -257,9 +258,10 @@ func (s *Server) GetConntrackStats(req *observerpb.GetConntrackStatsRequest, str
 	if err != nil {
 		return err
 	}
+	view := hubbleconntrack.Aggregate(hubbleconntrack.Filter(stats, req.GetFilter()), req.GetGroupBy())
 
 	// Endpoints and nodes are sent before the entries that reference them by index.
-	for ep := range stats.Endpoints() {
+	for ep := range view.Endpoints() {
 		if err := stream.Send(&observerpb.GetConntrackStatsResponse{
 			ResponseTypes: &observerpb.GetConntrackStatsResponse_Endpoint{Endpoint: ep},
 		}); err != nil {
@@ -267,7 +269,7 @@ func (s *Server) GetConntrackStats(req *observerpb.GetConntrackStatsRequest, str
 		}
 	}
 
-	for n := range stats.Nodes() {
+	for n := range view.Nodes() {
 		if err := stream.Send(&observerpb.GetConntrackStatsResponse{
 			ResponseTypes: &observerpb.GetConntrackStatsResponse_Node{Node: n},
 		}); err != nil {
@@ -275,7 +277,7 @@ func (s *Server) GetConntrackStats(req *observerpb.GetConntrackStatsRequest, str
 		}
 	}
 
-	for e := range stats.Entries() {
+	for e := range view.Entries() {
 		if err := stream.Send(&observerpb.GetConntrackStatsResponse{
 			ResponseTypes: &observerpb.GetConntrackStatsResponse_Entry{Entry: e},
 		}); err != nil {
