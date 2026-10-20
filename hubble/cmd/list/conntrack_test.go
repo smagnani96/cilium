@@ -104,3 +104,32 @@ func TestConntrackTableOutputServiceEntries(t *testing.T) {
 `
 	require.Equal(t, want, buf.String())
 }
+
+func TestConntrackTableOutputAggregated(t *testing.T) {
+	entries := []*conntrackpb.Entry{
+		{
+			Key:   &conntrackpb.Key{DestinationIp: "10.0.0.9", DestinationPort: 80, Protocol: 6},
+			Value: &conntrackpb.Value{TxPackets: 3},
+			Count: 2,
+		},
+		{
+			Key:   &conntrackpb.Key{DestinationIp: "10.0.0.8", DestinationPort: 80, Protocol: 6},
+			Value: &conntrackpb.Value{TxPackets: 1},
+			Count: 1,
+		},
+	}
+	var buf bytes.Buffer
+	require.NoError(t, conntrackTableOutput(&buf, entries, nil, nil, nil, false))
+	require.Equal(t, `SOURCE   DESTINATION   PROTO   COUNT   RX PACKETS   TX PACKETS   RX BYTES   TX BYTES
+*        10.0.0.8:80   TCP     1       0            1            0          0
+*        10.0.0.9:80   TCP     2       0            3            0          0
+`, buf.String())
+
+	require.Error(t, func() error { _, err := aggregationFields([]string{"nope"}); return err }())
+	fields, err := aggregationFields([]string{"source-ip", "destination-node"})
+	require.NoError(t, err)
+	require.Equal(t, []conntrackpb.AggregationField{
+		conntrackpb.AggregationField_AGGREGATION_FIELD_SOURCE_IP,
+		conntrackpb.AggregationField_AGGREGATION_FIELD_DESTINATION_NODE,
+	}, fields)
+}
