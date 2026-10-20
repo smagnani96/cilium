@@ -19,28 +19,32 @@ type View interface {
 	Nodes() iter.Seq[*conntrackpb.IndexedNode]
 }
 
-// Query is the filtering of a GetStatsRequest. Applying it leaves the cached
+// Query is the filtering and aggregation of a GetStatsRequest. Applying it leaves the cached
 // snapshot untouched, as other callers may query it differently.
 type Query struct {
-	filter *filter
+	filter  *filter
+	groupBy []conntrackpb.AggregationField
 }
 
 // NewQuery validates req, so that an invalid one is rejected before any work.
 func NewQuery(req *conntrackpb.GetStatsRequest) (*Query, error) {
 	f := req.GetFilter()
-	if !req.GetResolve() && filterUsesResolved(f) {
-		return nil, errors.New("filtering by endpoint, service or node requires resolve")
+	if !req.GetResolve() && (filterUsesResolved(f) || groupByUsesResolved(req.GetGroupBy())) {
+		return nil, errors.New("filtering or grouping by endpoint, service or node requires resolve")
 	}
 	flt, err := newFilter(f)
 	if err != nil {
 		return nil, err
 	}
-	return &Query{filter: flt}, nil
+	return &Query{filter: flt, groupBy: req.GetGroupBy()}, nil
 }
 
 func (q *Query) Apply(v View) View {
 	if q.filter != nil {
 		v = q.filter.apply(v)
+	}
+	if len(q.groupBy) > 0 {
+		v = aggregate(v, q.groupBy)
 	}
 	return v
 }
