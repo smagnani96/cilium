@@ -26,6 +26,80 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// AggregationField is a field of an entry to group by.
+type AggregationField int32
+
+const (
+	AggregationField_AGGREGATION_FIELD_UNSPECIFIED          AggregationField = 0
+	AggregationField_AGGREGATION_FIELD_SOURCE_IP            AggregationField = 1
+	AggregationField_AGGREGATION_FIELD_DESTINATION_IP       AggregationField = 2
+	AggregationField_AGGREGATION_FIELD_SOURCE_PORT          AggregationField = 3
+	AggregationField_AGGREGATION_FIELD_DESTINATION_PORT     AggregationField = 4
+	AggregationField_AGGREGATION_FIELD_PROTOCOL             AggregationField = 5
+	AggregationField_AGGREGATION_FIELD_SOURCE_ENDPOINT      AggregationField = 6
+	AggregationField_AGGREGATION_FIELD_DESTINATION_ENDPOINT AggregationField = 7
+	AggregationField_AGGREGATION_FIELD_DESTINATION_SERVICE  AggregationField = 8
+	AggregationField_AGGREGATION_FIELD_SOURCE_NODE          AggregationField = 9
+	AggregationField_AGGREGATION_FIELD_DESTINATION_NODE     AggregationField = 10
+)
+
+// Enum value maps for AggregationField.
+var (
+	AggregationField_name = map[int32]string{
+		0:  "AGGREGATION_FIELD_UNSPECIFIED",
+		1:  "AGGREGATION_FIELD_SOURCE_IP",
+		2:  "AGGREGATION_FIELD_DESTINATION_IP",
+		3:  "AGGREGATION_FIELD_SOURCE_PORT",
+		4:  "AGGREGATION_FIELD_DESTINATION_PORT",
+		5:  "AGGREGATION_FIELD_PROTOCOL",
+		6:  "AGGREGATION_FIELD_SOURCE_ENDPOINT",
+		7:  "AGGREGATION_FIELD_DESTINATION_ENDPOINT",
+		8:  "AGGREGATION_FIELD_DESTINATION_SERVICE",
+		9:  "AGGREGATION_FIELD_SOURCE_NODE",
+		10: "AGGREGATION_FIELD_DESTINATION_NODE",
+	}
+	AggregationField_value = map[string]int32{
+		"AGGREGATION_FIELD_UNSPECIFIED":          0,
+		"AGGREGATION_FIELD_SOURCE_IP":            1,
+		"AGGREGATION_FIELD_DESTINATION_IP":       2,
+		"AGGREGATION_FIELD_SOURCE_PORT":          3,
+		"AGGREGATION_FIELD_DESTINATION_PORT":     4,
+		"AGGREGATION_FIELD_PROTOCOL":             5,
+		"AGGREGATION_FIELD_SOURCE_ENDPOINT":      6,
+		"AGGREGATION_FIELD_DESTINATION_ENDPOINT": 7,
+		"AGGREGATION_FIELD_DESTINATION_SERVICE":  8,
+		"AGGREGATION_FIELD_SOURCE_NODE":          9,
+		"AGGREGATION_FIELD_DESTINATION_NODE":     10,
+	}
+)
+
+func (x AggregationField) Enum() *AggregationField {
+	p := new(AggregationField)
+	*p = x
+	return p
+}
+
+func (x AggregationField) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (AggregationField) Descriptor() protoreflect.EnumDescriptor {
+	return file_conntrack_conntrack_proto_enumTypes[0].Descriptor()
+}
+
+func (AggregationField) Type() protoreflect.EnumType {
+	return &file_conntrack_conntrack_proto_enumTypes[0]
+}
+
+func (x AggregationField) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use AggregationField.Descriptor instead.
+func (AggregationField) EnumDescriptor() ([]byte, []int) {
+	return file_conntrack_conntrack_proto_rawDescGZIP(), []int{0}
+}
+
 // GetStatsRequest is the request of the Observer.GetConntrackStats RPC.
 type GetStatsRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -34,7 +108,12 @@ type GetStatsRequest struct {
 	Resolve bool `protobuf:"varint,1,opt,name=resolve,proto3" json:"resolve,omitempty"`
 	// filter, if set, drops the entries that do not match it. The endpoint,
 	// service and node fields require resolve.
-	Filter        *Filter `protobuf:"bytes,2,opt,name=filter,proto3" json:"filter,omitempty"`
+	Filter *Filter `protobuf:"bytes,2,opt,name=filter,proto3" json:"filter,omitempty"`
+	// group_by, if set, merges the entries (that passed the filter) that agree
+	// on all of these fields into one, with summed counters, count set and
+	// the other fields cleared. Service entries are never merged with
+	// the others. The endpoint, service and node fields require resolve.
+	GroupBy       []AggregationField `protobuf:"varint,3,rep,packed,name=group_by,json=groupBy,proto3,enum=conntrack.AggregationField" json:"group_by,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -79,6 +158,13 @@ func (x *GetStatsRequest) GetResolve() bool {
 func (x *GetStatsRequest) GetFilter() *Filter {
 	if x != nil {
 		return x.Filter
+	}
+	return nil
+}
+
+func (x *GetStatsRequest) GetGroupBy() []AggregationField {
+	if x != nil {
+		return x.GroupBy
 	}
 	return nil
 }
@@ -362,8 +448,10 @@ type Entry struct {
 	// node, which is only attempted for those not resolved to a pod.
 	SourceNodeIndex      *uint32 `protobuf:"varint,7,opt,name=source_node_index,json=sourceNodeIndex,proto3,oneof" json:"source_node_index,omitempty"`
 	DestinationNodeIndex *uint32 `protobuf:"varint,8,opt,name=destination_node_index,json=destinationNodeIndex,proto3,oneof" json:"destination_node_index,omitempty"`
-	unknownFields        protoimpl.UnknownFields
-	sizeCache            protoimpl.SizeCache
+	// count is the number of entries merged into this one, if group_by is set.
+	Count         uint64 `protobuf:"varint,9,opt,name=count,proto3" json:"count,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Entry) Reset() {
@@ -448,6 +536,13 @@ func (x *Entry) GetSourceNodeIndex() uint32 {
 func (x *Entry) GetDestinationNodeIndex() uint32 {
 	if x != nil && x.DestinationNodeIndex != nil {
 		return *x.DestinationNodeIndex
+	}
+	return 0
+}
+
+func (x *Entry) GetCount() uint64 {
+	if x != nil {
+		return x.Count
 	}
 	return 0
 }
@@ -878,10 +973,11 @@ var File_conntrack_conntrack_proto protoreflect.FileDescriptor
 
 const file_conntrack_conntrack_proto_rawDesc = "" +
 	"\n" +
-	"\x19conntrack/conntrack.proto\x12\tconntrack\x1a\x0fflow/flow.proto\x1a\x11relay/relay.proto\"V\n" +
+	"\x19conntrack/conntrack.proto\x12\tconntrack\x1a\x0fflow/flow.proto\x1a\x11relay/relay.proto\"\x8e\x01\n" +
 	"\x0fGetStatsRequest\x12\x18\n" +
 	"\aresolve\x18\x01 \x01(\bR\aresolve\x12)\n" +
-	"\x06filter\x18\x02 \x01(\v2\x11.conntrack.FilterR\x06filter\"\x8d\x03\n" +
+	"\x06filter\x18\x02 \x01(\v2\x11.conntrack.FilterR\x06filter\x126\n" +
+	"\bgroup_by\x18\x03 \x03(\x0e2\x1b.conntrack.AggregationFieldR\agroupBy\"\x8d\x03\n" +
 	"\x06Filter\x12\x1b\n" +
 	"\tsource_ip\x18\x01 \x03(\tR\bsourceIp\x12%\n" +
 	"\x0edestination_ip\x18\x02 \x03(\tR\rdestinationIp\x12\x1f\n" +
@@ -903,7 +999,7 @@ const file_conntrack_conntrack_proto_rawDesc = "" +
 	"\bendpoint\x18\x03 \x01(\v2\x1a.conntrack.IndexedEndpointH\x00R\bendpoint\x125\n" +
 	"\aservice\x18\x04 \x01(\v2\x19.conntrack.IndexedServiceH\x00R\aservice\x12,\n" +
 	"\x04node\x18\x05 \x01(\v2\x16.conntrack.IndexedNodeH\x00R\x04nodeB\x10\n" +
-	"\x0eresponse_types\"\xaa\x04\n" +
+	"\x0eresponse_types\"\xc0\x04\n" +
 	"\x05Entry\x12 \n" +
 	"\x03key\x18\x01 \x01(\v2\x0e.conntrack.KeyR\x03key\x12&\n" +
 	"\x05value\x18\x02 \x01(\v2\x10.conntrack.ValueR\x05value\x12&\n" +
@@ -912,7 +1008,8 @@ const file_conntrack_conntrack_proto_rawDesc = "" +
 	"\x1adestination_endpoint_index\x18\x05 \x01(\rH\x01R\x18destinationEndpointIndex\x88\x01\x01\x12?\n" +
 	"\x19destination_service_index\x18\x06 \x01(\rH\x02R\x17destinationServiceIndex\x88\x01\x01\x12/\n" +
 	"\x11source_node_index\x18\a \x01(\rH\x03R\x0fsourceNodeIndex\x88\x01\x01\x129\n" +
-	"\x16destination_node_index\x18\b \x01(\rH\x04R\x14destinationNodeIndex\x88\x01\x01B\x18\n" +
+	"\x16destination_node_index\x18\b \x01(\rH\x04R\x14destinationNodeIndex\x88\x01\x01\x12\x14\n" +
+	"\x05count\x18\t \x01(\x04R\x05countB\x18\n" +
 	"\x16_source_endpoint_indexB\x1d\n" +
 	"\x1b_destination_endpoint_indexB\x1c\n" +
 	"\x1a_destination_service_indexB\x14\n" +
@@ -947,7 +1044,20 @@ const file_conntrack_conntrack_proto_rawDesc = "" +
 	"\brx_bytes\x18\x03 \x01(\x04R\arxBytes\x12\x19\n" +
 	"\btx_bytes\x18\x04 \x01(\x04R\atxBytes\"\x1d\n" +
 	"\x05State\x12\x14\n" +
-	"\x05alive\x18\x01 \x01(\bR\x05aliveB+Z)github.com/cilium/cilium/api/v1/conntrackb\x06proto3"
+	"\x05alive\x18\x01 \x01(\bR\x05alive*\xb0\x03\n" +
+	"\x10AggregationField\x12!\n" +
+	"\x1dAGGREGATION_FIELD_UNSPECIFIED\x10\x00\x12\x1f\n" +
+	"\x1bAGGREGATION_FIELD_SOURCE_IP\x10\x01\x12$\n" +
+	" AGGREGATION_FIELD_DESTINATION_IP\x10\x02\x12!\n" +
+	"\x1dAGGREGATION_FIELD_SOURCE_PORT\x10\x03\x12&\n" +
+	"\"AGGREGATION_FIELD_DESTINATION_PORT\x10\x04\x12\x1e\n" +
+	"\x1aAGGREGATION_FIELD_PROTOCOL\x10\x05\x12%\n" +
+	"!AGGREGATION_FIELD_SOURCE_ENDPOINT\x10\x06\x12*\n" +
+	"&AGGREGATION_FIELD_DESTINATION_ENDPOINT\x10\a\x12)\n" +
+	"%AGGREGATION_FIELD_DESTINATION_SERVICE\x10\b\x12!\n" +
+	"\x1dAGGREGATION_FIELD_SOURCE_NODE\x10\t\x12&\n" +
+	"\"AGGREGATION_FIELD_DESTINATION_NODE\x10\n" +
+	"B+Z)github.com/cilium/cilium/api/v1/conntrackb\x06proto3"
 
 var (
 	file_conntrack_conntrack_proto_rawDescOnce sync.Once
@@ -961,41 +1071,44 @@ func file_conntrack_conntrack_proto_rawDescGZIP() []byte {
 	return file_conntrack_conntrack_proto_rawDescData
 }
 
+var file_conntrack_conntrack_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
 var file_conntrack_conntrack_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
 var file_conntrack_conntrack_proto_goTypes = []any{
-	(*GetStatsRequest)(nil),       // 0: conntrack.GetStatsRequest
-	(*Filter)(nil),                // 1: conntrack.Filter
-	(*GetStatsResponse)(nil),      // 2: conntrack.GetStatsResponse
-	(*Entry)(nil),                 // 3: conntrack.Entry
-	(*IndexedEndpoint)(nil),       // 4: conntrack.IndexedEndpoint
-	(*IndexedService)(nil),        // 5: conntrack.IndexedService
-	(*IndexedNode)(nil),           // 6: conntrack.IndexedNode
-	(*Node)(nil),                  // 7: conntrack.Node
-	(*Key)(nil),                   // 8: conntrack.Key
-	(*Value)(nil),                 // 9: conntrack.Value
-	(*State)(nil),                 // 10: conntrack.State
-	(*relay.NodeStatusEvent)(nil), // 11: relay.NodeStatusEvent
-	(*flow.Endpoint)(nil),         // 12: flow.Endpoint
-	(*flow.Service)(nil),          // 13: flow.Service
+	(AggregationField)(0),         // 0: conntrack.AggregationField
+	(*GetStatsRequest)(nil),       // 1: conntrack.GetStatsRequest
+	(*Filter)(nil),                // 2: conntrack.Filter
+	(*GetStatsResponse)(nil),      // 3: conntrack.GetStatsResponse
+	(*Entry)(nil),                 // 4: conntrack.Entry
+	(*IndexedEndpoint)(nil),       // 5: conntrack.IndexedEndpoint
+	(*IndexedService)(nil),        // 6: conntrack.IndexedService
+	(*IndexedNode)(nil),           // 7: conntrack.IndexedNode
+	(*Node)(nil),                  // 8: conntrack.Node
+	(*Key)(nil),                   // 9: conntrack.Key
+	(*Value)(nil),                 // 10: conntrack.Value
+	(*State)(nil),                 // 11: conntrack.State
+	(*relay.NodeStatusEvent)(nil), // 12: relay.NodeStatusEvent
+	(*flow.Endpoint)(nil),         // 13: flow.Endpoint
+	(*flow.Service)(nil),          // 14: flow.Service
 }
 var file_conntrack_conntrack_proto_depIdxs = []int32{
-	1,  // 0: conntrack.GetStatsRequest.filter:type_name -> conntrack.Filter
-	3,  // 1: conntrack.GetStatsResponse.entry:type_name -> conntrack.Entry
-	11, // 2: conntrack.GetStatsResponse.node_status:type_name -> relay.NodeStatusEvent
-	4,  // 3: conntrack.GetStatsResponse.endpoint:type_name -> conntrack.IndexedEndpoint
-	5,  // 4: conntrack.GetStatsResponse.service:type_name -> conntrack.IndexedService
-	6,  // 5: conntrack.GetStatsResponse.node:type_name -> conntrack.IndexedNode
-	8,  // 6: conntrack.Entry.key:type_name -> conntrack.Key
-	9,  // 7: conntrack.Entry.value:type_name -> conntrack.Value
-	10, // 8: conntrack.Entry.state:type_name -> conntrack.State
-	12, // 9: conntrack.IndexedEndpoint.endpoint:type_name -> flow.Endpoint
-	13, // 10: conntrack.IndexedService.service:type_name -> flow.Service
-	7,  // 11: conntrack.IndexedNode.node:type_name -> conntrack.Node
-	12, // [12:12] is the sub-list for method output_type
-	12, // [12:12] is the sub-list for method input_type
-	12, // [12:12] is the sub-list for extension type_name
-	12, // [12:12] is the sub-list for extension extendee
-	0,  // [0:12] is the sub-list for field type_name
+	2,  // 0: conntrack.GetStatsRequest.filter:type_name -> conntrack.Filter
+	0,  // 1: conntrack.GetStatsRequest.group_by:type_name -> conntrack.AggregationField
+	4,  // 2: conntrack.GetStatsResponse.entry:type_name -> conntrack.Entry
+	12, // 3: conntrack.GetStatsResponse.node_status:type_name -> relay.NodeStatusEvent
+	5,  // 4: conntrack.GetStatsResponse.endpoint:type_name -> conntrack.IndexedEndpoint
+	6,  // 5: conntrack.GetStatsResponse.service:type_name -> conntrack.IndexedService
+	7,  // 6: conntrack.GetStatsResponse.node:type_name -> conntrack.IndexedNode
+	9,  // 7: conntrack.Entry.key:type_name -> conntrack.Key
+	10, // 8: conntrack.Entry.value:type_name -> conntrack.Value
+	11, // 9: conntrack.Entry.state:type_name -> conntrack.State
+	13, // 10: conntrack.IndexedEndpoint.endpoint:type_name -> flow.Endpoint
+	14, // 11: conntrack.IndexedService.service:type_name -> flow.Service
+	8,  // 12: conntrack.IndexedNode.node:type_name -> conntrack.Node
+	13, // [13:13] is the sub-list for method output_type
+	13, // [13:13] is the sub-list for method input_type
+	13, // [13:13] is the sub-list for extension type_name
+	13, // [13:13] is the sub-list for extension extendee
+	0,  // [0:13] is the sub-list for field type_name
 }
 
 func init() { file_conntrack_conntrack_proto_init() }
@@ -1016,13 +1129,14 @@ func file_conntrack_conntrack_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_conntrack_conntrack_proto_rawDesc), len(file_conntrack_conntrack_proto_rawDesc)),
-			NumEnums:      0,
+			NumEnums:      1,
 			NumMessages:   11,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
 		GoTypes:           file_conntrack_conntrack_proto_goTypes,
 		DependencyIndexes: file_conntrack_conntrack_proto_depIdxs,
+		EnumInfos:         file_conntrack_conntrack_proto_enumTypes,
 		MessageInfos:      file_conntrack_conntrack_proto_msgTypes,
 	}.Build()
 	File_conntrack_conntrack_proto = out.File

@@ -19,6 +19,27 @@ message GetStatsRequest {
     // filter, if set, drops the entries that do not match it. The endpoint,
     // service and node fields require resolve.
     Filter filter = 2;
+
+    // group_by, if set, merges the entries (that passed the filter) that agree
+    // on all of these fields into one, with summed counters, count set and
+    // the other fields cleared. Service entries are never merged with
+    // the others. The endpoint, service and node fields require resolve.
+    repeated AggregationField group_by = 3;
+}
+
+// AggregationField is a field of an entry to group by.
+enum AggregationField {
+    AGGREGATION_FIELD_UNSPECIFIED = 0;
+    AGGREGATION_FIELD_SOURCE_IP = 1;
+    AGGREGATION_FIELD_DESTINATION_IP = 2;
+    AGGREGATION_FIELD_SOURCE_PORT = 3;
+    AGGREGATION_FIELD_DESTINATION_PORT = 4;
+    AGGREGATION_FIELD_PROTOCOL = 5;
+    AGGREGATION_FIELD_SOURCE_ENDPOINT = 6;
+    AGGREGATION_FIELD_DESTINATION_ENDPOINT = 7;
+    AGGREGATION_FIELD_DESTINATION_SERVICE = 8;
+    AGGREGATION_FIELD_SOURCE_NODE = 9;
+    AGGREGATION_FIELD_DESTINATION_NODE = 10;
 }
 
 // Filter matches the entries that match all of its set fields. A repeated
@@ -82,6 +103,9 @@ message Entry {
     // node, which is only attempted for those not resolved to a pod.
     optional uint32 source_node_index = 7;
     optional uint32 destination_node_index = 8;
+
+    // count is the number of entries merged into this one, if group_by is set.
+    uint64 count = 9;
 }
 
 // IndexedEndpoint is a resolved endpoint, referenced by index from the entries

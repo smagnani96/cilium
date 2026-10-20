@@ -16,6 +16,8 @@
     - [State](#conntrack-State)
     - [Value](#conntrack-Value)
   
+    - [AggregationField](#conntrack-AggregationField)
+  
 - [Scalar Value Types](#scalar-value-types)
 
 
@@ -43,6 +45,7 @@ Entry is an entry from a node&#39;s datapath conntrack stats map.
 | destination_service_index | [uint32](#uint32) | optional | destination_service_index references the IndexedService matching the destination IP and port. It is unset if no service matches. |
 | source_node_index | [uint32](#uint32) | optional | source_node_index and destination_node_index reference the IndexedNode owning the respective IP. They are unset if the IP is not resolved to a node, which is only attempted for those not resolved to a pod. |
 | destination_node_index | [uint32](#uint32) | optional |  |
+| count | [uint64](#uint64) |  | count is the number of entries merged into this one, if group_by is set. |
 
 
 
@@ -84,6 +87,7 @@ GetStatsRequest is the request of the Observer.GetConntrackStats RPC.
 | ----- | ---- | ----- | ----------- |
 | resolve | [bool](#bool) |  | resolve makes the entries carry the endpoints, services and nodes of their addresses, which cost a lookup each. They are left out otherwise. |
 | filter | [Filter](#conntrack-Filter) |  | filter, if set, drops the entries that do not match it. The endpoint, service and node fields require resolve. |
+| group_by | [AggregationField](#conntrack-AggregationField) | repeated | group_by, if set, merges the entries (that passed the filter) that agree on all of these fields into one, with summed counters, count set and the other fields cleared. Service entries are never merged with the others. The endpoint, service and node fields require resolve. |
 
 
 
@@ -234,6 +238,27 @@ Value represents the value of a conntrack stats entry.
 
 
  
+
+
+<a name="conntrack-AggregationField"></a>
+
+### AggregationField
+AggregationField is a field of an entry to group by.
+
+| Name | Number | Description |
+| ---- | ------ | ----------- |
+| AGGREGATION_FIELD_UNSPECIFIED | 0 |  |
+| AGGREGATION_FIELD_SOURCE_IP | 1 |  |
+| AGGREGATION_FIELD_DESTINATION_IP | 2 |  |
+| AGGREGATION_FIELD_SOURCE_PORT | 3 |  |
+| AGGREGATION_FIELD_DESTINATION_PORT | 4 |  |
+| AGGREGATION_FIELD_PROTOCOL | 5 |  |
+| AGGREGATION_FIELD_SOURCE_ENDPOINT | 6 |  |
+| AGGREGATION_FIELD_DESTINATION_ENDPOINT | 7 |  |
+| AGGREGATION_FIELD_DESTINATION_SERVICE | 8 |  |
+| AGGREGATION_FIELD_SOURCE_NODE | 9 |  |
+| AGGREGATION_FIELD_DESTINATION_NODE | 10 |  |
+
 
  
 
