@@ -50,7 +50,7 @@ func dumpCtStats() {
 		}
 		defer m.Close()
 
-		callback := func(key ctmap.StatsKey, value *ctmap.CtStats) {
+		callback := func(key ctmap.StatsKey, value *ctmap.CtStats) bool {
 			record := ctmap.StatsRecord{Key: key, Value: value}
 			if command.OutputOption() {
 				entries = append(entries, record)
@@ -62,6 +62,7 @@ func dumpCtStats() {
 					fmt.Println(sb.String())
 				}
 			}
+			return true
 		}
 		if err := m.DumpWithCallback(callback); err != nil {
 			fmt.Fprintf(os.Stderr, "Error while collecting CT Stats BPF map %s entries: %s\n", m.Name(), err)

@@ -72,7 +72,7 @@ type StatsMap interface {
 	DeleteAll() error
 	Lookup(key StatsKey) (*CtStats, error)
 	LookupAndDelete(key StatsKey) (*CtStats, bool, error)
-	DumpWithCallback(callback func(key StatsKey, value *CtStats)) error
+	DumpWithCallback(callback func(key StatsKey, value *CtStats) bool) error
 }
 
 type statsMap struct {
@@ -85,15 +85,15 @@ func (m *statsMap) DeleteAll() error {
 	return m.Map.DeleteAll()
 }
 
-func (m *statsMap) DumpWithCallback(cb func(key StatsKey, value *CtStats)) error {
+func (m *statsMap) DumpWithCallback(cb func(key StatsKey, value *CtStats) bool) error {
 	switch m.mapType {
 	case mapTypeStats4:
-		return iterate[CtKey4Global, CtStats](m.Map, func(key bpf.MapKey, value bpf.MapValue) {
-			cb(key.(CtKey), value.(*CtStats))
+		return iterate[CtKey4Global, CtStats](m.Map, func(key bpf.MapKey, value bpf.MapValue) bool {
+			return cb(key.(CtKey), value.(*CtStats))
 		})
 	case mapTypeStats6:
-		return iterate[CtKey6Global, CtStats](m.Map, func(key bpf.MapKey, value bpf.MapValue) {
-			cb(key.(CtKey), value.(*CtStats))
+		return iterate[CtKey6Global, CtStats](m.Map, func(key bpf.MapKey, value bpf.MapValue) bool {
+			return cb(key.(CtKey), value.(*CtStats))
 		})
 	default:
 		panic("Unexpected map type " + m.mapType.String())
@@ -338,10 +338,10 @@ func (c *statsCollector) collectMap(statsMap StatsMap, ch chan<- prometheus.Metr
 		tcpEntries, nontcpEntries uint
 	)
 
-	err := statsMap.DumpWithCallback(func(k StatsKey, v *CtStats) {
+	err := statsMap.DumpWithCallback(func(k StatsKey, v *CtStats) bool {
 		// A service entry accounts again the packets of its backend entry.
 		if k.GetFlags()&TUPLE_F_SERVICE != 0 {
-			return
+			return true
 		}
 		if isKeyTCP(k) {
 			tcpTotal.Add(v)
@@ -350,6 +350,7 @@ func (c *statsCollector) collectMap(statsMap StatsMap, ch chan<- prometheus.Metr
 			nontcpTotal.Add(v)
 			nontcpEntries++
 		}
+		return true
 	})
 	if err != nil {
 		return fmt.Errorf("failed to dump %s: %w", statsMap.Name(), err)

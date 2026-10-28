@@ -151,11 +151,13 @@ func ctEntryExist(ctMap *Map, ctKey bpf.MapKey, f func(*CtEntry) bool) bool {
 
 // iterate iterates over all entries in the given BPF map (non per-CPU) and
 // applies the filterCallback to each key-value pair.
-func iterate[KT any, VT any, KP bpf.KeyPointer[KT], VP bpf.ValuePointer[VT]](m *bpf.Map, filterCallback func(key bpf.MapKey, value bpf.MapValue)) error {
+func iterate[KT any, VT any, KP bpf.KeyPointer[KT], VP bpf.ValuePointer[VT]](m *bpf.Map, filterCallback func(key bpf.MapKey, value bpf.MapValue) bool) error {
 	ctx := context.Background()
 	seq, errFn := bpf.BatchIterate[KT, VT, KP, VP](ctx, m)
 	for k, v := range seq {
-		filterCallback(k, v)
+		if !filterCallback(k, v) {
+			break
+		}
 	}
 	return errFn()
 }

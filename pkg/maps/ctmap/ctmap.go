@@ -504,7 +504,7 @@ type tupleKeyAccessor interface {
 	GetFlags() uint8
 }
 
-func (m *Map) cleanup(filter GCFilter, natMap *nat.Map, stats *gcStats, next func(GCEvent), ipv6 bool) func(key bpf.MapKey, value bpf.MapValue) {
+func (m *Map) cleanup(filter GCFilter, natMap *nat.Map, stats *gcStats, next func(GCEvent), ipv6 bool) func(key bpf.MapKey, value bpf.MapValue) bool {
 	var countFailedFn func(uint16, uint32)
 	if ACT != nil {
 		countFailedFn = ACT.CountFailed4
@@ -516,7 +516,7 @@ func (m *Map) cleanup(filter GCFilter, natMap *nat.Map, stats *gcStats, next fun
 	// allocations so that the lookups are faster. The callbacks run sequentially
 	// within a single GC pass, so reuse is safe.
 	scratch := &CtEntry{}
-	return func(key bpf.MapKey, value bpf.MapValue) {
+	return func(key bpf.MapKey, value bpf.MapValue) bool {
 		// TODO: These type assertions are a bit dangerous, make more of this well typed
 		// to avoid having to make these assertions.
 		tupleKey := key.(tupleKeyAccessor)
@@ -551,6 +551,7 @@ func (m *Map) cleanup(filter GCFilter, natMap *nat.Map, stats *gcStats, next fun
 		default:
 			stats.aliveEntries++
 		}
+		return true
 	}
 }
 
