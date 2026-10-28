@@ -3,6 +3,7 @@
 
 syntax = "proto3";
 
+import "flow/flow.proto";
 import "relay/relay.proto";
 
 package conntrack;
@@ -15,10 +16,13 @@ message GetStatsRequest {}
 // GetStatsResponse streams the entries themselves, or a status update about
 // the node. When served by Hubble Relay, entries from all the nodes are
 // aggregated and each node's issues are reported as node statuses.
+// Every IndexedEndpoint referenced by an entry is guaranteed to be sent, once,
+// before the entries referencing it.
 message GetStatsResponse {
     oneof response_types {
         Entry entry = 1;
         relay.NodeStatusEvent node_status = 2;
+        IndexedEndpoint endpoint = 3;
     }
 }
 
@@ -27,6 +31,19 @@ message Entry {
     Key key = 1;
     Value value = 2;
     State state = 3;
+
+    // source_endpoint_index and destination_endpoint_index reference the
+    // IndexedEndpoint resolved for the respective IP. They are unset if the
+    // endpoint could not be resolved.
+    optional uint32 source_endpoint_index = 4;
+    optional uint32 destination_endpoint_index = 5;
+}
+
+// IndexedEndpoint is a resolved endpoint, referenced by index from the entries
+// sharing it.
+message IndexedEndpoint {
+    uint32 index = 1;
+    flow.Endpoint endpoint = 2;
 }
 
 // Key represents the key of a conntrack stats entry.

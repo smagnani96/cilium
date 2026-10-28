@@ -10,6 +10,7 @@
 package conntrack
 
 import (
+	flow "github.com/cilium/cilium/api/v1/flow"
 	relay "github.com/cilium/cilium/api/v1/relay"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
@@ -65,12 +66,15 @@ func (*GetStatsRequest) Descriptor() ([]byte, []int) {
 // GetStatsResponse streams the entries themselves, or a status update about
 // the node. When served by Hubble Relay, entries from all the nodes are
 // aggregated and each node's issues are reported as node statuses.
+// Every IndexedEndpoint referenced by an entry is guaranteed to be sent, once,
+// before the entries referencing it.
 type GetStatsResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to ResponseTypes:
 	//
 	//	*GetStatsResponse_Entry
 	//	*GetStatsResponse_NodeStatus
+	//	*GetStatsResponse_Endpoint
 	ResponseTypes isGetStatsResponse_ResponseTypes `protobuf_oneof:"response_types"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -131,6 +135,15 @@ func (x *GetStatsResponse) GetNodeStatus() *relay.NodeStatusEvent {
 	return nil
 }
 
+func (x *GetStatsResponse) GetEndpoint() *IndexedEndpoint {
+	if x != nil {
+		if x, ok := x.ResponseTypes.(*GetStatsResponse_Endpoint); ok {
+			return x.Endpoint
+		}
+	}
+	return nil
+}
+
 type isGetStatsResponse_ResponseTypes interface {
 	isGetStatsResponse_ResponseTypes()
 }
@@ -143,18 +156,29 @@ type GetStatsResponse_NodeStatus struct {
 	NodeStatus *relay.NodeStatusEvent `protobuf:"bytes,2,opt,name=node_status,json=nodeStatus,proto3,oneof"`
 }
 
+type GetStatsResponse_Endpoint struct {
+	Endpoint *IndexedEndpoint `protobuf:"bytes,3,opt,name=endpoint,proto3,oneof"`
+}
+
 func (*GetStatsResponse_Entry) isGetStatsResponse_ResponseTypes() {}
 
 func (*GetStatsResponse_NodeStatus) isGetStatsResponse_ResponseTypes() {}
 
+func (*GetStatsResponse_Endpoint) isGetStatsResponse_ResponseTypes() {}
+
 // Entry is an entry from a node's datapath conntrack stats map.
 type Entry struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Key           *Key                   `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
-	Value         *Value                 `protobuf:"bytes,2,opt,name=value,proto3" json:"value,omitempty"`
-	State         *State                 `protobuf:"bytes,3,opt,name=state,proto3" json:"state,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Key   *Key                   `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
+	Value *Value                 `protobuf:"bytes,2,opt,name=value,proto3" json:"value,omitempty"`
+	State *State                 `protobuf:"bytes,3,opt,name=state,proto3" json:"state,omitempty"`
+	// source_endpoint_index and destination_endpoint_index reference the
+	// IndexedEndpoint resolved for the respective IP. They are unset if the
+	// endpoint could not be resolved.
+	SourceEndpointIndex      *uint32 `protobuf:"varint,4,opt,name=source_endpoint_index,json=sourceEndpointIndex,proto3,oneof" json:"source_endpoint_index,omitempty"`
+	DestinationEndpointIndex *uint32 `protobuf:"varint,5,opt,name=destination_endpoint_index,json=destinationEndpointIndex,proto3,oneof" json:"destination_endpoint_index,omitempty"`
+	unknownFields            protoimpl.UnknownFields
+	sizeCache                protoimpl.SizeCache
 }
 
 func (x *Entry) Reset() {
@@ -208,6 +232,74 @@ func (x *Entry) GetState() *State {
 	return nil
 }
 
+func (x *Entry) GetSourceEndpointIndex() uint32 {
+	if x != nil && x.SourceEndpointIndex != nil {
+		return *x.SourceEndpointIndex
+	}
+	return 0
+}
+
+func (x *Entry) GetDestinationEndpointIndex() uint32 {
+	if x != nil && x.DestinationEndpointIndex != nil {
+		return *x.DestinationEndpointIndex
+	}
+	return 0
+}
+
+// IndexedEndpoint is a resolved endpoint, referenced by index from the entries
+// sharing it.
+type IndexedEndpoint struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Index         uint32                 `protobuf:"varint,1,opt,name=index,proto3" json:"index,omitempty"`
+	Endpoint      *flow.Endpoint         `protobuf:"bytes,2,opt,name=endpoint,proto3" json:"endpoint,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *IndexedEndpoint) Reset() {
+	*x = IndexedEndpoint{}
+	mi := &file_conntrack_conntrack_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *IndexedEndpoint) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*IndexedEndpoint) ProtoMessage() {}
+
+func (x *IndexedEndpoint) ProtoReflect() protoreflect.Message {
+	mi := &file_conntrack_conntrack_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use IndexedEndpoint.ProtoReflect.Descriptor instead.
+func (*IndexedEndpoint) Descriptor() ([]byte, []int) {
+	return file_conntrack_conntrack_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *IndexedEndpoint) GetIndex() uint32 {
+	if x != nil {
+		return x.Index
+	}
+	return 0
+}
+
+func (x *IndexedEndpoint) GetEndpoint() *flow.Endpoint {
+	if x != nil {
+		return x.Endpoint
+	}
+	return nil
+}
+
 // Key represents the key of a conntrack stats entry.
 type Key struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
@@ -223,7 +315,7 @@ type Key struct {
 
 func (x *Key) Reset() {
 	*x = Key{}
-	mi := &file_conntrack_conntrack_proto_msgTypes[3]
+	mi := &file_conntrack_conntrack_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -235,7 +327,7 @@ func (x *Key) String() string {
 func (*Key) ProtoMessage() {}
 
 func (x *Key) ProtoReflect() protoreflect.Message {
-	mi := &file_conntrack_conntrack_proto_msgTypes[3]
+	mi := &file_conntrack_conntrack_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -248,7 +340,7 @@ func (x *Key) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Key.ProtoReflect.Descriptor instead.
 func (*Key) Descriptor() ([]byte, []int) {
-	return file_conntrack_conntrack_proto_rawDescGZIP(), []int{3}
+	return file_conntrack_conntrack_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *Key) GetSourceIp() string {
@@ -306,7 +398,7 @@ type Value struct {
 
 func (x *Value) Reset() {
 	*x = Value{}
-	mi := &file_conntrack_conntrack_proto_msgTypes[4]
+	mi := &file_conntrack_conntrack_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -318,7 +410,7 @@ func (x *Value) String() string {
 func (*Value) ProtoMessage() {}
 
 func (x *Value) ProtoReflect() protoreflect.Message {
-	mi := &file_conntrack_conntrack_proto_msgTypes[4]
+	mi := &file_conntrack_conntrack_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -331,7 +423,7 @@ func (x *Value) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Value.ProtoReflect.Descriptor instead.
 func (*Value) Descriptor() ([]byte, []int) {
-	return file_conntrack_conntrack_proto_rawDescGZIP(), []int{4}
+	return file_conntrack_conntrack_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *Value) GetRxPackets() uint64 {
@@ -372,7 +464,7 @@ type State struct {
 
 func (x *State) Reset() {
 	*x = State{}
-	mi := &file_conntrack_conntrack_proto_msgTypes[5]
+	mi := &file_conntrack_conntrack_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -384,7 +476,7 @@ func (x *State) String() string {
 func (*State) ProtoMessage() {}
 
 func (x *State) ProtoReflect() protoreflect.Message {
-	mi := &file_conntrack_conntrack_proto_msgTypes[5]
+	mi := &file_conntrack_conntrack_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -397,7 +489,7 @@ func (x *State) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use State.ProtoReflect.Descriptor instead.
 func (*State) Descriptor() ([]byte, []int) {
-	return file_conntrack_conntrack_proto_rawDescGZIP(), []int{5}
+	return file_conntrack_conntrack_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *State) GetAlive() bool {
@@ -411,17 +503,25 @@ var File_conntrack_conntrack_proto protoreflect.FileDescriptor
 
 const file_conntrack_conntrack_proto_rawDesc = "" +
 	"\n" +
-	"\x19conntrack/conntrack.proto\x12\tconntrack\x1a\x11relay/relay.proto\"\x11\n" +
-	"\x0fGetStatsRequest\"\x89\x01\n" +
+	"\x19conntrack/conntrack.proto\x12\tconntrack\x1a\x0fflow/flow.proto\x1a\x11relay/relay.proto\"\x11\n" +
+	"\x0fGetStatsRequest\"\xc3\x01\n" +
 	"\x10GetStatsResponse\x12(\n" +
 	"\x05entry\x18\x01 \x01(\v2\x10.conntrack.EntryH\x00R\x05entry\x129\n" +
 	"\vnode_status\x18\x02 \x01(\v2\x16.relay.NodeStatusEventH\x00R\n" +
-	"nodeStatusB\x10\n" +
-	"\x0eresponse_types\"y\n" +
+	"nodeStatus\x128\n" +
+	"\bendpoint\x18\x03 \x01(\v2\x1a.conntrack.IndexedEndpointH\x00R\bendpointB\x10\n" +
+	"\x0eresponse_types\"\xae\x02\n" +
 	"\x05Entry\x12 \n" +
 	"\x03key\x18\x01 \x01(\v2\x0e.conntrack.KeyR\x03key\x12&\n" +
 	"\x05value\x18\x02 \x01(\v2\x10.conntrack.ValueR\x05value\x12&\n" +
-	"\x05state\x18\x03 \x01(\v2\x10.conntrack.StateR\x05state\"\xc7\x01\n" +
+	"\x05state\x18\x03 \x01(\v2\x10.conntrack.StateR\x05state\x127\n" +
+	"\x15source_endpoint_index\x18\x04 \x01(\rH\x00R\x13sourceEndpointIndex\x88\x01\x01\x12A\n" +
+	"\x1adestination_endpoint_index\x18\x05 \x01(\rH\x01R\x18destinationEndpointIndex\x88\x01\x01B\x18\n" +
+	"\x16_source_endpoint_indexB\x1d\n" +
+	"\x1b_destination_endpoint_index\"S\n" +
+	"\x0fIndexedEndpoint\x12\x14\n" +
+	"\x05index\x18\x01 \x01(\rR\x05index\x12*\n" +
+	"\bendpoint\x18\x02 \x01(\v2\x0e.flow.EndpointR\bendpoint\"\xc7\x01\n" +
 	"\x03Key\x12\x1b\n" +
 	"\tsource_ip\x18\x01 \x01(\tR\bsourceIp\x12\x1f\n" +
 	"\vsource_port\x18\x02 \x01(\rR\n" +
@@ -452,27 +552,31 @@ func file_conntrack_conntrack_proto_rawDescGZIP() []byte {
 	return file_conntrack_conntrack_proto_rawDescData
 }
 
-var file_conntrack_conntrack_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
+var file_conntrack_conntrack_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_conntrack_conntrack_proto_goTypes = []any{
 	(*GetStatsRequest)(nil),       // 0: conntrack.GetStatsRequest
 	(*GetStatsResponse)(nil),      // 1: conntrack.GetStatsResponse
 	(*Entry)(nil),                 // 2: conntrack.Entry
-	(*Key)(nil),                   // 3: conntrack.Key
-	(*Value)(nil),                 // 4: conntrack.Value
-	(*State)(nil),                 // 5: conntrack.State
-	(*relay.NodeStatusEvent)(nil), // 6: relay.NodeStatusEvent
+	(*IndexedEndpoint)(nil),       // 3: conntrack.IndexedEndpoint
+	(*Key)(nil),                   // 4: conntrack.Key
+	(*Value)(nil),                 // 5: conntrack.Value
+	(*State)(nil),                 // 6: conntrack.State
+	(*relay.NodeStatusEvent)(nil), // 7: relay.NodeStatusEvent
+	(*flow.Endpoint)(nil),         // 8: flow.Endpoint
 }
 var file_conntrack_conntrack_proto_depIdxs = []int32{
 	2, // 0: conntrack.GetStatsResponse.entry:type_name -> conntrack.Entry
-	6, // 1: conntrack.GetStatsResponse.node_status:type_name -> relay.NodeStatusEvent
-	3, // 2: conntrack.Entry.key:type_name -> conntrack.Key
-	4, // 3: conntrack.Entry.value:type_name -> conntrack.Value
-	5, // 4: conntrack.Entry.state:type_name -> conntrack.State
-	5, // [5:5] is the sub-list for method output_type
-	5, // [5:5] is the sub-list for method input_type
-	5, // [5:5] is the sub-list for extension type_name
-	5, // [5:5] is the sub-list for extension extendee
-	0, // [0:5] is the sub-list for field type_name
+	7, // 1: conntrack.GetStatsResponse.node_status:type_name -> relay.NodeStatusEvent
+	3, // 2: conntrack.GetStatsResponse.endpoint:type_name -> conntrack.IndexedEndpoint
+	4, // 3: conntrack.Entry.key:type_name -> conntrack.Key
+	5, // 4: conntrack.Entry.value:type_name -> conntrack.Value
+	6, // 5: conntrack.Entry.state:type_name -> conntrack.State
+	8, // 6: conntrack.IndexedEndpoint.endpoint:type_name -> flow.Endpoint
+	7, // [7:7] is the sub-list for method output_type
+	7, // [7:7] is the sub-list for method input_type
+	7, // [7:7] is the sub-list for extension type_name
+	7, // [7:7] is the sub-list for extension extendee
+	0, // [0:7] is the sub-list for field type_name
 }
 
 func init() { file_conntrack_conntrack_proto_init() }
@@ -483,14 +587,16 @@ func file_conntrack_conntrack_proto_init() {
 	file_conntrack_conntrack_proto_msgTypes[1].OneofWrappers = []any{
 		(*GetStatsResponse_Entry)(nil),
 		(*GetStatsResponse_NodeStatus)(nil),
+		(*GetStatsResponse_Endpoint)(nil),
 	}
+	file_conntrack_conntrack_proto_msgTypes[2].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_conntrack_conntrack_proto_rawDesc), len(file_conntrack_conntrack_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   6,
+			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
