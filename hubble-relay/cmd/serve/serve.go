@@ -43,6 +43,7 @@ const (
 	keyPeerService             = "peer-service"
 	keySortBufferMaxLen        = "sort-buffer-len-max"
 	keySortBufferDrainTimeout  = "sort-buffer-drain-timeout"
+	keyConntrackStatsCacheTTL  = "ct-stats-cache-ttl"
 	keyTLSHubbleClientCertFile = "tls-hubble-client-cert-file"
 	keyTLSClientCertFile       = "tls-client-cert-file" // Deprecated: replaced by keyTLSHubbleClientCertFile
 	keyTLSHubbleClientKeyFile  = "tls-hubble-client-key-file"
@@ -126,6 +127,10 @@ func New(vp *viper.Viper) *cobra.Command {
 		keySortBufferDrainTimeout,
 		defaults.SortBufferDrainTimeout,
 		"When the per-request flows sort buffer is not full, a flow is drained every time this timeout is reached (only affects requests in follow-mode)")
+	flags.Duration(
+		keyConntrackStatsCacheTTL,
+		defaults.ConntrackStatsCacheTTL,
+		"Duration for which the merged cluster-wide conntrack stats are cached")
 	flags.String(
 		keyTLSClientCertFile,
 		"",
@@ -213,6 +218,7 @@ func Run(ctx context.Context, vp *viper.Viper, additionalOptions ...server.Optio
 		server.WithRetryTimeout(vp.GetDuration(keyRetryTimeout)),
 		server.WithSortBufferMaxLen(vp.GetInt(keySortBufferMaxLen)),
 		server.WithSortBufferDrainTimeout(vp.GetDuration(keySortBufferDrainTimeout)),
+		server.WithConntrackStatsCacheTTL(vp.GetDuration(keyConntrackStatsCacheTTL)),
 		server.WithLogger(logger),
 		server.WithGRPCUnaryInterceptor(relayVersionUnaryInterceptor()),
 		server.WithGRPCStreamInterceptor(relayVersionStreamInterceptor()),

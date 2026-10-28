@@ -37,6 +37,7 @@ var defaultOptions = options{
 	sortBufferDrainTimeout: defaults.SortBufferDrainTimeout,
 	errorAggregationWindow: defaults.ErrorAggregationWindow,
 	peerUpdateInterval:     defaults.PeerUpdateInterval,
+	conntrackStatsCacheTTL: defaults.ConntrackStatsCacheTTL,
 	ocb:                    defaultObserverClientBuilder{},
 }
 
@@ -49,6 +50,7 @@ type options struct {
 	sortBufferDrainTimeout time.Duration
 	errorAggregationWindow time.Duration
 	peerUpdateInterval     time.Duration
+	conntrackStatsCacheTTL time.Duration
 	log                    *slog.Logger
 
 	// this is not meant to be user configurable as it's only useful to
@@ -98,6 +100,19 @@ func WithErrorAggregationWindow(d time.Duration) Option {
 			return fmt.Errorf("value for ErrorAggregationWindow must be greater than 0: %d", d)
 		}
 		o.errorAggregationWindow = d
+		return nil
+	}
+}
+
+// WithConntrackStatsCacheTTL sets for how long the merged cluster-wide
+// conntrack stats are cached before the peers are queried again. This value
+// must be equal or greater than 0.
+func WithConntrackStatsCacheTTL(d time.Duration) Option {
+	return func(o *options) error {
+		if d < 0 {
+			return fmt.Errorf("value for ConntrackStatsCacheTTL must be equal or greater than 0: %d", d)
+		}
+		o.conntrackStatsCacheTTL = d
 		return nil
 	}
 }

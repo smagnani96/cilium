@@ -4,7 +4,12 @@
 package ctstats
 
 import (
+	"context"
+	"errors"
+	"slices"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -210,4 +215,54 @@ func TestMergeConntrackResponses_AllPeersFailed(t *testing.T) {
 	require.Len(t, stats.entries, 0)
 	require.Len(t, stats.nodeStatuses, 1)
 	require.Equal(t, []string{"node-a"}, stats.nodeStatuses[0].GetNodeStatus().GetNodeNames())
+}
+
+func TestExporterCache(t *testing.T) {
+	var fetches atomic.Int32
+	fetch := func(ctx context.Context) (<-chan *conntrackpb.GetStatsResponse, func() error) {
+		fetches.Add(1)
+		ch := make(chan *conntrackpb.GetStatsResponse, 1)
+		ch <- &conntrackpb.GetStatsResponse{ResponseTypes: &conntrackpb.GetStatsResponse_Entry{
+			Entry: &conntrackpb.Entry{
+				Key:   &conntrackpb.Key{SourceIp: "10.0.0.1", DestinationIp: "10.0.0.2"},
+				Value: &conntrackpb.Value{RxPackets: 1},
+			},
+		}}
+		close(ch)
+		return ch, func() error { return nil }
+	}
+
+	e := NewStatsExporter(fetch, time.Hour)
+	for range 3 {
+		s, err := e.Snapshot(context.Background())
+		require.NoError(t, err)
+		require.Len(t, slices.Collect(s.Entries()), 1)
+	}
+	require.EqualValues(t, 1, fetches.Load())
+
+	// An expired cache triggers a new fetch.
+	e = NewStatsExporter(fetch, time.Nanosecond)
+	for range 2 {
+		_, err := e.Snapshot(context.Background())
+		require.NoError(t, err)
+		time.Sleep(time.Millisecond)
+	}
+	require.EqualValues(t, 3, fetches.Load())
+}
+
+func TestExporterCache_ErrorNotCached(t *testing.T) {
+	var fetches atomic.Int32
+	fetch := func(ctx context.Context) (<-chan *conntrackpb.GetStatsResponse, func() error) {
+		fetches.Add(1)
+		ch := make(chan *conntrackpb.GetStatsResponse)
+		close(ch)
+		return ch, func() error { return errors.New("boom") }
+	}
+
+	e := NewStatsExporter(fetch, time.Hour)
+	for range 2 {
+		_, err := e.Snapshot(context.Background())
+		require.Error(t, err)
+	}
+	require.EqualValues(t, 2, fetches.Load())
 }

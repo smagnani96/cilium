@@ -9,6 +9,8 @@ import (
 
 	conntrackpb "github.com/cilium/cilium/api/v1/conntrack"
 	"github.com/cilium/cilium/pkg/ctstats"
+	"github.com/cilium/cilium/pkg/ctstats/ttlcache"
+	"github.com/cilium/cilium/pkg/time"
 )
 
 // ctKey identifies a logical connection across nodes.
@@ -67,24 +69,41 @@ func (c *Snapshot) NodeStatuses() iter.Seq[*conntrackpb.GetStatsResponse] {
 	}
 }
 
+// fetchTimeout bounds a cluster-wide fetch, which is shared by its callers.
+const fetchTimeout = time.Minute
+
 // StatsExporter is responsible for exporting conntrack stats retrieved from
-// multiple nodes.
+// multiple nodes. The merged Snapshot is cached for the ttl, so that concurrent
+// and subsequent clients are served without fanning out to the peers again.
 type StatsExporter struct {
-	fetch func(ctx context.Context) (<-chan *conntrackpb.GetStatsResponse, func() error)
+	snapshot *ttlcache.Cache[*Snapshot]
 }
 
-func NewStatsExporter(fetch func(ctx context.Context) (<-chan *conntrackpb.GetStatsResponse, func() error)) *StatsExporter {
-	return &StatsExporter{fetch: fetch}
+func NewStatsExporter(fetch func(ctx context.Context) (<-chan *conntrackpb.GetStatsResponse, func() error), ttl time.Duration) *StatsExporter {
+	return &StatsExporter{
+		snapshot: ttlcache.New(ttl, func(ctx context.Context) (*Snapshot, error) {
+			// Detach from the caller's cancellation, as the result is shared.
+			ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), fetchTimeout)
+			defer cancel()
+
+			responses, wait := fetch(ctx)
+			snap := mergeConntrackResponses(responses)
+			if err := wait(); err != nil {
+				return nil, err
+			}
+			return snap, nil
+		}),
+	}
 }
 
+// Snapshot returns the conntrack stats from all the nodes, refreshing them
+// first if the cached ones are older than the ttl. The returned Snapshot is
+// shared and must not be modified.
 func (c *StatsExporter) Snapshot(ctx context.Context) (*Snapshot, error) {
-	responses, wait := c.fetch(ctx)
-
-	snap := mergeConntrackResponses(responses)
-	if err := wait(); err != nil {
+	snap, err := c.snapshot.Get(ctx)
+	if err != nil {
 		return nil, err
 	}
-
 	return snap, nil
 }
 
