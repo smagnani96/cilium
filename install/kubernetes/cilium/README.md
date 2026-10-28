@@ -629,6 +629,7 @@ contributors across the globe, there is almost always someone available to help.
 | hubble.redact.http.userInfo | bool | `true` | Enables redacting user info, e.g., password when basic auth is used. Example:    redact:     enabled: true     http:       userInfo: true  You can specify the options from the helm CLI:    --set hubble.redact.enabled="true"   --set hubble.redact.http.userInfo="true" |
 | hubble.relay.affinity | object | `{"podAffinity":{"requiredDuringSchedulingIgnoredDuringExecution":[{"labelSelector":{"matchLabels":{"k8s-app":"cilium"}},"topologyKey":"kubernetes.io/hostname"}]}}` | Affinity for hubble-replay |
 | hubble.relay.annotations | object | `{}` | Annotations to be added to all top-level hubble-relay objects (resources under templates/hubble-relay) |
+| hubble.relay.ctStatsCacheTTL | string | `nil` | Duration for which the merged cluster-wide conntrack stats served by GetConntrackStats are cached by Hubble Relay (e.g. "30s"). Defaults to 30s. |
 | hubble.relay.enabled | bool | `false` | Enable Hubble Relay (requires hubble.enabled=true) |
 | hubble.relay.extraEnv | list | `[]` | Additional hubble-relay environment variables. |
 | hubble.relay.extraInitContainers | list | `[]` | Additional init containers added to the hubble-relay Deployment. |

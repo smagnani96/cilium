@@ -37,19 +37,19 @@
      - bool
      - ``false``
    * - :spelling:ignore:`alibabacloud.nodeSpec.securityGroupTags`
-     - 
+     -
      - list
      - ``[]``
    * - :spelling:ignore:`alibabacloud.nodeSpec.securityGroups`
-     - 
+     -
      - list
      - ``[]``
    * - :spelling:ignore:`alibabacloud.nodeSpec.vSwitchTags`
-     - 
+     -
      - list
      - ``[]``
    * - :spelling:ignore:`alibabacloud.nodeSpec.vSwitches`
-     - 
+     -
      - list
      - ``[]``
    * - :spelling:ignore:`annotateK8sNode`
@@ -249,7 +249,7 @@
      - bool
      - ``false``
    * - :spelling:ignore:`azure.nodeSpec.azureInterfaceName`
-     - 
+     -
      - string
      - ``""``
    * - :spelling:ignore:`bandwidthManager`
@@ -2045,7 +2045,7 @@
      - object
      - ``{}``
    * - :spelling:ignore:`gatewayAPI.inferenceExtension.enabled`
-     - 
+     -
      - bool
      - ``false``
    * - :spelling:ignore:`gatewayAPI.secretsNamespace`
@@ -2316,6 +2316,10 @@
      - Annotations to be added to all top-level hubble-relay objects (resources under templates/hubble-relay)
      - object
      - ``{}``
+   * - :spelling:ignore:`hubble.relay.ctStatsCacheTTL`
+     - Duration for which the merged cluster-wide conntrack stats served by GetConntrackStats are cached by Hubble Relay (e.g. "30s"). Defaults to 30s.
+     - string
+     - ``nil``
    * - :spelling:ignore:`hubble.relay.enabled`
      - Enable Hubble Relay (requires hubble.enabled=true)
      - bool

@@ -38,6 +38,9 @@ data:
     retry-timeout: {{ .Values.hubble.relay.retryTimeout }}
     sort-buffer-len-max: {{ .Values.hubble.relay.sortBufferLenMax }}
     sort-buffer-drain-timeout: {{ .Values.hubble.relay.sortBufferDrainTimeout }}
+    {{- with .Values.hubble.relay.ctStatsCacheTTL }}
+    ct-stats-cache-ttl: {{ . | quote }}
+    {{- end }}
     {{- if .Values.hubble.tls.enabled }}
     tls-hubble-client-cert-file: /var/lib/hubble-relay/tls/client.crt
     tls-hubble-client-key-file: /var/lib/hubble-relay/tls/client.key

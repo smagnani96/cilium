@@ -3529,6 +3529,12 @@
             "annotations": {
               "type": "object"
             },
+            "ctStatsCacheTTL": {
+              "type": [
+                "null",
+                "string"
+              ]
+            },
             "enabled": {
               "type": "boolean"
             },

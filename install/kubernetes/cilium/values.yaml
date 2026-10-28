@@ -1971,6 +1971,12 @@ hubble:
     # -- When the per-request flows sort buffer is not full, a flow is drained every
     # time this timeout is reached (only affects requests in follow-mode) (e.g. "1s").
     sortBufferDrainTimeout: ~
+    # @schema
+    # type: [null, string]
+    # @schema
+    # -- Duration for which the merged cluster-wide conntrack stats served by
+    # GetConntrackStats are cached by Hubble Relay (e.g. "30s"). Defaults to 30s.
+    ctStatsCacheTTL: ~
     # -- Port to use for the k8s service backed by hubble-relay pods.
     # If not set, it is dynamically assigned to port 443 if TLS is enabled and to
     # port 80 if not.
