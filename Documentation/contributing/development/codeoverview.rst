@@ -91,7 +91,7 @@ Hubble CLI can be found in the separate repository `github.com/cilium/hubble
 separate repository `github.com/cilium/hubble-ui
 <https://github.com/cilium/hubble-ui>`_.
 
-api/v1/external, api/v1/flow, api/v1/observer, api/v1/peer, api/v1/relay
+api/v1/conntrack, api/v1/external, api/v1/flow, api/v1/observer, api/v1/peer, api/v1/relay
   API specifications of the Hubble APIs.
 
 hubble-relay
