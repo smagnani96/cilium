@@ -14,6 +14,7 @@ import (
 
 	"github.com/cilium/cilium/api/v1/models"
 	"github.com/cilium/cilium/pkg/cgroups/manager"
+	"github.com/cilium/cilium/pkg/ctstats"
 	"github.com/cilium/cilium/pkg/endpointmanager"
 	"github.com/cilium/cilium/pkg/hubble/dropeventemitter"
 	exportercell "github.com/cilium/cilium/pkg/hubble/exporter/cell"
@@ -93,6 +94,8 @@ type hubbleParams struct {
 
 	TLSConfigPromise tlsConfigPromise
 
+	CTStats *ctstats.Cache
+
 	// NOTE: ordering is not guaranteed, do not rely on it.
 	ObserverOptions  []observeroption.Option                `group:"hubble-observer-options"`
 	ExporterBuilders []*exportercell.FlowLogExporterBuilder `group:"hubble-exporter-builders"`
@@ -124,6 +127,7 @@ func newHubbleIntegration(params hubbleParams) (HubbleIntegration, error) {
 		params.NodeLocalStore,
 		params.MonitorAgent,
 		params.TLSConfigPromise,
+		params.CTStats,
 		params.ObserverOptions,
 		params.ExporterBuilders,
 		params.DropEventEmitter,

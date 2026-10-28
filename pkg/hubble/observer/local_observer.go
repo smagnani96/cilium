@@ -20,10 +20,12 @@ import (
 	flowpb "github.com/cilium/cilium/api/v1/flow"
 	observerpb "github.com/cilium/cilium/api/v1/observer"
 	"github.com/cilium/cilium/pkg/counter"
+	"github.com/cilium/cilium/pkg/ctstats"
 	v1 "github.com/cilium/cilium/pkg/hubble/api/v1"
 	"github.com/cilium/cilium/pkg/hubble/build"
 	"github.com/cilium/cilium/pkg/hubble/container"
 	"github.com/cilium/cilium/pkg/hubble/filters"
+	observerctstats "github.com/cilium/cilium/pkg/hubble/observer/ctstats"
 	"github.com/cilium/cilium/pkg/hubble/observer/namespace"
 	"github.com/cilium/cilium/pkg/hubble/observer/observeroption"
 	observerTypes "github.com/cilium/cilium/pkg/hubble/observer/types"
@@ -68,12 +70,16 @@ type LocalObserverServer struct {
 	numObservedFlows atomic.Uint64
 
 	nsManager namespace.Manager
+
+	// ctStats is the cache of the datapath conntrack stats
+	ctStats *ctstats.Cache
 }
 
 // NewLocalServer returns a new local observer server.
 func NewLocalServer(
 	payloadParser parser.Decoder,
 	nsManager namespace.Manager,
+	ctStats *ctstats.Cache,
 	logger *slog.Logger,
 	options ...observeroption.Option,
 ) (*LocalObserverServer, error) {
@@ -99,6 +105,7 @@ func NewLocalServer(
 		payloadParser: payloadParser,
 		startTime:     time.Now(),
 		nsManager:     nsManager,
+		ctStats:       ctStats,
 		opts:          opts,
 	}
 
@@ -262,7 +269,27 @@ func (s *LocalObserverServer) GetConntrackStats(
 	req *conntrackpb.GetStatsRequest,
 	server observerpb.Observer_GetConntrackStatsServer,
 ) error {
-	return status.Error(codes.Unimplemented, "GetConntrackStats not implemented")
+	if s.ctStats == nil {
+		return status.Error(codes.Unavailable, "conntrack stats are not enabled")
+	}
+
+	ctx := server.Context()
+	snap, err := s.ctStats.Snapshot(ctx)
+	if err != nil {
+		return status.Errorf(codes.Internal, "failed to get conntrack stats: %v", err)
+	}
+
+	for e := range observerctstats.Entries(snap) {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := server.Send(&conntrackpb.GetStatsResponse{
+			ResponseTypes: &conntrackpb.GetStatsResponse_Entry{Entry: e},
+		}); err != nil {
+			return err
+		}
+	}
+	return ctx.Err()
 }
 
 // GetFlows implements the proto method for client requests.

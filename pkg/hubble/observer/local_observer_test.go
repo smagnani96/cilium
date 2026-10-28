@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/netip"
 	"slices"
 	"testing"
 	"time"
@@ -17,12 +18,16 @@ import (
 	"github.com/gopacket/gopacket/layers"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	conntrackpb "github.com/cilium/cilium/api/v1/conntrack"
 	flowpb "github.com/cilium/cilium/api/v1/flow"
 	observerpb "github.com/cilium/cilium/api/v1/observer"
+	"github.com/cilium/cilium/pkg/ctstats"
 	hubv1 "github.com/cilium/cilium/pkg/hubble/api/v1"
 	"github.com/cilium/cilium/pkg/hubble/container"
 	"github.com/cilium/cilium/pkg/hubble/observer/namespace"
@@ -54,7 +59,7 @@ func noopParser(tb testing.TB) *parser.Parser {
 
 func TestNewLocalServer(t *testing.T) {
 	pp, nm := noopParser(t), testutils.NoopNamespaceManager
-	s, err := NewLocalServer(pp, nm, hivetest.Logger(t))
+	s, err := NewLocalServer(pp, nm, nil, hivetest.Logger(t))
 	require.NoError(t, err)
 	assert.NotNil(t, s.GetStopped())
 	assert.NotNil(t, s.GetPayloadParser())
@@ -65,7 +70,7 @@ func TestNewLocalServer(t *testing.T) {
 
 func TestLocalObserverServer_ServerStatus(t *testing.T) {
 	pp, nm := noopParser(t), testutils.NoopNamespaceManager
-	s, err := NewLocalServer(pp, nm, hivetest.Logger(t), observeroption.WithMaxFlows(container.Capacity1))
+	s, err := NewLocalServer(pp, nm, nil, hivetest.Logger(t), observeroption.WithMaxFlows(container.Capacity1))
 	require.NoError(t, err)
 	res, err := s.ServerStatus(t.Context(), &observerpb.ServerStatusRequest{})
 	require.NoError(t, err)
@@ -217,7 +222,7 @@ func TestLocalObserverServer_GetFlows(t *testing.T) {
 	}
 
 	pp, nm := noopParser(t), testutils.NoopNamespaceManager
-	s, err := NewLocalServer(pp, nm, hivetest.Logger(t),
+	s, err := NewLocalServer(pp, nm, nil, hivetest.Logger(t),
 		observeroption.WithMaxFlows(container.Capacity127),
 		observeroption.WithMonitorBuffer(queueSize),
 	)
@@ -355,7 +360,7 @@ func TestLocalObserverServer_GetAgentEvents(t *testing.T) {
 	}
 
 	pp, nm := noopParser(t), testutils.NoopNamespaceManager
-	s, err := NewLocalServer(pp, nm, hivetest.Logger(t),
+	s, err := NewLocalServer(pp, nm, nil, hivetest.Logger(t),
 		observeroption.WithMonitorBuffer(queueSize),
 	)
 	require.NoError(t, err)
@@ -404,7 +409,7 @@ func TestLocalObserverServer_GetFlows_Follow_Since(t *testing.T) {
 	}
 
 	pp, nm := noopParser(t), testutils.NoopNamespaceManager
-	s, err := NewLocalServer(pp, nm, hivetest.Logger(t),
+	s, err := NewLocalServer(pp, nm, nil, hivetest.Logger(t),
 		observeroption.WithMaxFlows(container.Capacity127),
 		observeroption.WithMonitorBuffer(queueSize),
 	)
@@ -502,7 +507,7 @@ func TestHooks(t *testing.T) {
 	}
 
 	pp, nm := noopParser(t), testutils.NoopNamespaceManager
-	s, err := NewLocalServer(pp, nm, hivetest.Logger(t),
+	s, err := NewLocalServer(pp, nm, nil, hivetest.Logger(t),
 		observeroption.WithMaxFlows(container.Capacity15),
 		observeroption.WithMonitorBuffer(queueSize),
 		observeroption.WithOnMonitorEventFunc(onMonitorEventFirst),
@@ -559,7 +564,7 @@ func TestLocalObserverServer_OnFlowDelivery(t *testing.T) {
 	}
 
 	pp, nm := noopParser(t), testutils.NoopNamespaceManager
-	s, err := NewLocalServer(pp, nm, hivetest.Logger(t),
+	s, err := NewLocalServer(pp, nm, nil, hivetest.Logger(t),
 		observeroption.WithMaxFlows(container.Capacity127),
 		observeroption.WithMonitorBuffer(queueSize),
 		observeroption.WithOnFlowDeliveryFunc(onFlowDelivery),
@@ -622,7 +627,7 @@ func TestLocalObserverServer_OnGetFlows(t *testing.T) {
 	}
 
 	pp, nm := noopParser(t), testutils.NoopNamespaceManager
-	s, err := NewLocalServer(pp, nm, hivetest.Logger(t),
+	s, err := NewLocalServer(pp, nm, nil, hivetest.Logger(t),
 		observeroption.WithMaxFlows(container.Capacity127),
 		observeroption.WithMonitorBuffer(queueSize),
 		observeroption.WithOnFlowDeliveryFunc(onFlowDelivery),
@@ -700,7 +705,7 @@ func TestLocalObserverServer_NodeLabels(t *testing.T) {
 
 	// local hubble observer setup.
 	pp, nm := noopParser(t), testutils.NoopNamespaceManager
-	s, err := NewLocalServer(pp, nm, hivetest.Logger(t),
+	s, err := NewLocalServer(pp, nm, nil, hivetest.Logger(t),
 		observeroption.WithOnDecodedFlow(localNodeWatcher),
 	)
 	require.NoError(t, err)
@@ -745,7 +750,7 @@ func TestLocalObserverServer_GetNamespaces(t *testing.T) {
 		Namespace: "aaa",
 		Cluster:   "some-cluster",
 	})
-	s, err := NewLocalServer(pp, nsManager, hivetest.Logger(t), observeroption.WithMaxFlows(container.Capacity1))
+	s, err := NewLocalServer(pp, nsManager, nil, hivetest.Logger(t), observeroption.WithMaxFlows(container.Capacity1))
 	require.NoError(t, err)
 	res, err := s.GetNamespaces(t.Context(), &observerpb.GetNamespacesRequest{})
 	require.NoError(t, err)
@@ -767,10 +772,53 @@ func TestLocalObserverServer_GetNamespaces(t *testing.T) {
 	assert.Equal(t, expected, res)
 }
 
+func TestLocalObserverServer_GetConntrackStats(t *testing.T) {
+	pp := noopParser(t)
+	nm := namespace.NewManager()
+
+	t.Run("disabled", func(t *testing.T) {
+		s, err := NewLocalServer(pp, nm, nil, hivetest.Logger(t))
+		require.NoError(t, err)
+		err = s.GetConntrackStats(&conntrackpb.GetStatsRequest{}, &testutils.FakeGetConntrackStatsServer{
+			FakeGRPCServerStream: &testutils.FakeGRPCServerStream{OnContext: t.Context},
+		})
+		require.Equal(t, codes.Unavailable, status.Code(err))
+	})
+
+	t.Run("enabled", func(t *testing.T) {
+		tuple := ctstats.Tuple{
+			Src: netip.MustParseAddr("10.0.0.1"), Dst: netip.MustParseAddr("10.0.0.2"),
+			SrcPort: 1234, DstPort: 80, Proto: 6,
+		}
+		cache := ctstats.New(func(_ context.Context, yield func(ctstats.Tuple, ctstats.Value) bool) error {
+			yield(tuple, ctstats.Value{RxPackets: 1, TxPackets: 2, RxBytes: 3, TxBytes: 4})
+			return nil
+		}, time.Minute, 10)
+		s, err := NewLocalServer(pp, nm, cache, hivetest.Logger(t))
+		require.NoError(t, err)
+
+		var got []*conntrackpb.GetStatsResponse
+		err = s.GetConntrackStats(&conntrackpb.GetStatsRequest{}, &testutils.FakeGetConntrackStatsServer{
+			OnSend: func(r *conntrackpb.GetStatsResponse) error {
+				got = append(got, r)
+				return nil
+			},
+			FakeGRPCServerStream: &testutils.FakeGRPCServerStream{OnContext: t.Context},
+		})
+		require.NoError(t, err)
+		require.Len(t, got, 1)
+		e := got[0].GetEntry()
+		require.Equal(t, "10.0.0.1", e.GetKey().GetSourceIp())
+		require.EqualValues(t, 80, e.GetKey().GetDestinationPort())
+		require.EqualValues(t, 4, e.GetValue().GetTxBytes())
+		require.True(t, e.GetState().GetAlive())
+	})
+}
+
 func Benchmark_TrackNamespaces(b *testing.B) {
 	pp := noopParser(b)
 	nsManager := namespace.NewManager()
-	s, err := NewLocalServer(pp, nsManager, hivetest.Logger(b), observeroption.WithMaxFlows(container.Capacity1))
+	s, err := NewLocalServer(pp, nsManager, nil, hivetest.Logger(b), observeroption.WithMaxFlows(container.Capacity1))
 	if err != nil {
 		b.Fatal(err)
 	}
