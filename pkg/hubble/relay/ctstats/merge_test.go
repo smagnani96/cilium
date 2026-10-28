@@ -14,15 +14,22 @@ import (
 	"github.com/stretchr/testify/require"
 
 	conntrackpb "github.com/cilium/cilium/api/v1/conntrack"
+	flowpb "github.com/cilium/cilium/api/v1/flow"
 	relaypb "github.com/cilium/cilium/api/v1/relay"
+	"github.com/cilium/cilium/pkg/ctstats"
+	hubblectstats "github.com/cilium/cilium/pkg/hubble/ctstats"
 )
+
+func aggregate(entries map[ctKey]*ctValue, e *conntrackpb.Entry) {
+	aggregateCtEntry(entries, e, nil, nil, hubblectstats.NewEndpointDedup())
+}
 
 func TestAggregateGlobalCtEntry(t *testing.T) {
 	entries := make(map[ctKey]*ctValue)
 
 	// First observation of the connection, from node "a": higher packet
 	// count, no bytes, no resolved metadata.
-	aggregateCtEntry(entries, &conntrackpb.Entry{
+	aggregate(entries, &conntrackpb.Entry{
 		Key: &conntrackpb.Key{
 			SourceIp:        "10.0.0.1",
 			DestinationIp:   "10.0.0.2",
@@ -34,7 +41,7 @@ func TestAggregateGlobalCtEntry(t *testing.T) {
 
 	// A distinct connection (different destination port) must not be merged
 	// into the one above.
-	aggregateCtEntry(entries, &conntrackpb.Entry{
+	aggregate(entries, &conntrackpb.Entry{
 		Key: &conntrackpb.Key{
 			SourceIp:        "10.0.0.1",
 			DestinationIp:   "10.0.0.2",
@@ -69,7 +76,7 @@ func TestAggregateGlobalCtEntry_SameConnection(t *testing.T) {
 		Protocol:        6,
 	}
 
-	aggregateCtEntry(entries, &conntrackpb.Entry{
+	aggregate(entries, &conntrackpb.Entry{
 		Key:   key,
 		Value: &conntrackpb.Value{RxPackets: 5, RxBytes: 100},
 	})
@@ -77,7 +84,7 @@ func TestAggregateGlobalCtEntry_SameConnection(t *testing.T) {
 	// The same connection observed from node "b", with a distinct
 	// *ConntrackStatsKey instance (as would happen across two peer responses)
 	// but the same logical identity: it must be merged, not duplicated.
-	aggregateCtEntry(entries, &conntrackpb.Entry{
+	aggregate(entries, &conntrackpb.Entry{
 		Key: &conntrackpb.Key{
 			SourceIp:        "10.0.0.1",
 			DestinationIp:   "10.0.0.2",
@@ -99,7 +106,7 @@ func TestAggregateGlobalCtEntry_InOutMirror(t *testing.T) {
 	entries := make(map[ctKey]*ctValue)
 
 	// Sending endpoint's node reports the TUPLE_F_OUT view first.
-	aggregateCtEntry(entries, &conntrackpb.Entry{
+	aggregate(entries, &conntrackpb.Entry{
 		Key: &conntrackpb.Key{
 			SourceIp:        "10.244.0.6",
 			SourcePort:      40924,
@@ -112,7 +119,7 @@ func TestAggregateGlobalCtEntry_InOutMirror(t *testing.T) {
 	})
 
 	// Receiving endpoint's node reports the TUPLE_F_IN mirror: RX/TX swapped.
-	aggregateCtEntry(entries, &conntrackpb.Entry{
+	aggregate(entries, &conntrackpb.Entry{
 		Key: &conntrackpb.Key{
 			SourceIp:        "10.244.0.6",
 			SourcePort:      40924,
@@ -138,7 +145,7 @@ func TestAggregateGlobalCtEntry_InOutMirror(t *testing.T) {
 func TestAggregateGlobalCtEntry_InOutMirror_ReverseOrder(t *testing.T) {
 	entries := make(map[ctKey]*ctValue)
 
-	aggregateCtEntry(entries, &conntrackpb.Entry{
+	aggregate(entries, &conntrackpb.Entry{
 		Key: &conntrackpb.Key{
 			SourceIp:        "10.244.0.6",
 			SourcePort:      40924,
@@ -150,7 +157,7 @@ func TestAggregateGlobalCtEntry_InOutMirror_ReverseOrder(t *testing.T) {
 		Value: &conntrackpb.Value{RxPackets: 1, RxBytes: 112, TxPackets: 1, TxBytes: 205},
 	})
 
-	aggregateCtEntry(entries, &conntrackpb.Entry{
+	aggregate(entries, &conntrackpb.Entry{
 		Key: &conntrackpb.Key{
 			SourceIp:        "10.244.0.6",
 			SourcePort:      40924,
@@ -170,64 +177,152 @@ func TestAggregateGlobalCtEntry_InOutMirror_ReverseOrder(t *testing.T) {
 	require.EqualValues(t, 205, merged.RxBytes)
 }
 
-func TestMergeConntrackResponses(t *testing.T) {
-	responses := make(chan *conntrackpb.GetStatsResponse, 3)
-	responses <- &conntrackpb.GetStatsResponse{
-		ResponseTypes: &conntrackpb.GetStatsResponse_Entry{
-			Entry: &conntrackpb.Entry{
-				Key:   &conntrackpb.Key{SourceIp: "10.0.0.1", DestinationIp: "10.0.0.2", DestinationPort: 80, Protocol: 6},
-				Value: &conntrackpb.Value{RxPackets: 5},
-			},
-		},
-	}
-	responses <- &conntrackpb.GetStatsResponse{
-		ResponseTypes: &conntrackpb.GetStatsResponse_Entry{
-			Entry: &conntrackpb.Entry{
-				Key:   &conntrackpb.Key{SourceIp: "10.0.0.3", DestinationIp: "10.0.0.4", DestinationPort: 443, Protocol: 6},
-				Value: &conntrackpb.Value{RxPackets: 1},
-			},
-		},
-	}
-	responses <- &conntrackpb.GetStatsResponse{
+func peerResp(peer string, resp *conntrackpb.GetStatsResponse) *PeerResponse {
+	return &PeerResponse{Peer: peer, Response: resp}
+}
+
+func entryResp(e *conntrackpb.Entry) *conntrackpb.GetStatsResponse {
+	return &conntrackpb.GetStatsResponse{ResponseTypes: &conntrackpb.GetStatsResponse_Entry{Entry: e}}
+}
+
+func endpointResp(idx uint32, ep *flowpb.Endpoint) *conntrackpb.GetStatsResponse {
+	return &conntrackpb.GetStatsResponse{ResponseTypes: &conntrackpb.GetStatsResponse_Endpoint{
+		Endpoint: &conntrackpb.IndexedEndpoint{Index: idx, Endpoint: ep},
+	}}
+}
+
+func nodeErrorResp(node string) *conntrackpb.GetStatsResponse {
+	return &conntrackpb.GetStatsResponse{
 		ResponseTypes: &conntrackpb.GetStatsResponse_NodeStatus{
-			NodeStatus: &relaypb.NodeStatusEvent{StateChange: relaypb.NodeState_NODE_ERROR, NodeNames: []string{"node-c"}},
+			NodeStatus: &relaypb.NodeStatusEvent{StateChange: relaypb.NodeState_NODE_ERROR, NodeNames: []string{node}},
 		},
 	}
+}
+
+func TestMergeConntrackResponses(t *testing.T) {
+	responses := make(chan *PeerResponse, 3)
+	responses <- peerResp("node-a", entryResp(&conntrackpb.Entry{
+		Key:   &conntrackpb.Key{SourceIp: "10.0.0.1", DestinationIp: "10.0.0.2", DestinationPort: 80, Protocol: 6},
+		Value: &conntrackpb.Value{RxPackets: 5},
+	}))
+	responses <- peerResp("node-b", entryResp(&conntrackpb.Entry{
+		Key:   &conntrackpb.Key{SourceIp: "10.0.0.3", DestinationIp: "10.0.0.4", DestinationPort: 443, Protocol: 6},
+		Value: &conntrackpb.Value{RxPackets: 1},
+	}))
+	responses <- peerResp("node-c", nodeErrorResp("node-c"))
 	close(responses)
 
-	stats := mergeConntrackResponses(responses)
-	require.Len(t, stats.entries, 2)
+	snap := mergeConntrackResponses(responses)
+	require.Len(t, snap.entries, 2)
+	require.Empty(t, slices.Collect(snap.Endpoints()))
 
-	require.Len(t, stats.nodeStatuses, 1)
-	require.Equal(t, []string{"node-c"}, stats.nodeStatuses[0].GetNodeStatus().GetNodeNames())
+	require.Len(t, snap.nodeStatuses, 1)
+	require.Equal(t, []string{"node-c"}, snap.nodeStatuses[0].GetNodeStatus().GetNodeNames())
 }
 
 func TestMergeConntrackResponses_AllPeersFailed(t *testing.T) {
-	responses := make(chan *conntrackpb.GetStatsResponse, 1)
-	responses <- &conntrackpb.GetStatsResponse{
-		ResponseTypes: &conntrackpb.GetStatsResponse_NodeStatus{
-			NodeStatus: &relaypb.NodeStatusEvent{StateChange: relaypb.NodeState_NODE_ERROR, NodeNames: []string{"node-a"}},
-		},
-	}
+	responses := make(chan *PeerResponse, 1)
+	responses <- peerResp("node-a", nodeErrorResp("node-a"))
 	close(responses)
 
-	stats := mergeConntrackResponses(responses)
-	require.Len(t, stats.entries, 0)
-	require.Len(t, stats.nodeStatuses, 1)
-	require.Equal(t, []string{"node-a"}, stats.nodeStatuses[0].GetNodeStatus().GetNodeNames())
+	snap := mergeConntrackResponses(responses)
+	require.Empty(t, snap.entries)
+	require.Len(t, snap.nodeStatuses, 1)
+	require.Equal(t, []string{"node-a"}, snap.nodeStatuses[0].GetNodeStatus().GetNodeNames())
+}
+
+func TestMergeConntrackResponses_Endpoints(t *testing.T) {
+	db := &flowpb.Endpoint{Namespace: "default", PodName: "db", PodUid: "db-uid"}
+	// Same pod as web, as seen from another node: the endpoint ID is unknown.
+	webRemote := &flowpb.Endpoint{Namespace: "default", PodName: "web", PodUid: "web-uid", Identity: 7}
+	webLocal := &flowpb.Endpoint{ID: 42, Namespace: "default", PodName: "web", PodUid: "web-uid"}
+
+	key := func(src, dst string) *conntrackpb.Key {
+		return &conntrackpb.Key{SourceIp: src, DestinationIp: dst, DestinationPort: 80, Protocol: 6}
+	}
+	idx := func(i uint32) *uint32 { return &i }
+
+	responses := make(chan *PeerResponse, 16)
+	// node-a: web is index 0, db is index 1.
+	responses <- peerResp("node-a", endpointResp(0, webLocal))
+	responses <- peerResp("node-a", endpointResp(1, db))
+	responses <- peerResp("node-a", entryResp(&conntrackpb.Entry{
+		Key: key("10.0.0.1", "10.0.0.2"), SourceEndpointIndex: idx(0), DestinationEndpointIndex: idx(1),
+	}))
+	// node-b: the very same indices refer to different endpoints, and the
+	// connection is the same as node-a's, resolved only on the source side.
+	responses <- peerResp("node-b", endpointResp(0, db))
+	responses <- peerResp("node-b", endpointResp(1, webRemote))
+	responses <- peerResp("node-b", entryResp(&conntrackpb.Entry{
+		Key: key("10.0.0.2", "10.0.0.1"), SourceEndpointIndex: idx(0), DestinationEndpointIndex: idx(1),
+	}))
+	responses <- peerResp("node-b", entryResp(&conntrackpb.Entry{
+		Key: key("10.0.0.1", "10.0.0.2"), SourceEndpointIndex: idx(1),
+	}))
+	// node-c: unresolved observation of an already resolved connection.
+	responses <- peerResp("node-c", entryResp(&conntrackpb.Entry{Key: key("10.0.0.1", "10.0.0.2")}))
+	// node-c: unresolved connection.
+	responses <- peerResp("node-c", entryResp(&conntrackpb.Entry{Key: key("10.0.0.9", "10.0.0.8")}))
+	close(responses)
+
+	snap := mergeConntrackResponses(responses)
+
+	var eps []*flowpb.Endpoint
+	for ep := range snap.Endpoints() {
+		require.EqualValues(t, len(eps), ep.GetIndex())
+		eps = append(eps, ep.GetEndpoint())
+	}
+	require.Equal(t, []*flowpb.Endpoint{webLocal, db}, eps, "web and db must be forwarded once")
+
+	byKey := make(map[ctKey]*conntrackpb.Entry)
+	for e := range snap.Entries() {
+		byKey[keyOf(e.GetKey())] = e
+	}
+	require.Len(t, byKey, 3)
+
+	e := byKey[keyOf(key("10.0.0.1", "10.0.0.2"))]
+	require.EqualValues(t, 0, e.GetSourceEndpointIndex())
+	require.EqualValues(t, 1, e.GetDestinationEndpointIndex())
+
+	e = byKey[keyOf(key("10.0.0.2", "10.0.0.1"))]
+	require.EqualValues(t, 1, e.GetSourceEndpointIndex())
+	require.EqualValues(t, 0, e.GetDestinationEndpointIndex())
+
+	e = byKey[keyOf(key("10.0.0.9", "10.0.0.8"))]
+	require.Nil(t, e.SourceEndpointIndex)
+	require.Nil(t, e.DestinationEndpointIndex)
+}
+
+func TestMergeConntrackResponses_EndpointsKeptOnCanonicalSwitch(t *testing.T) {
+	web := &flowpb.Endpoint{Namespace: "default", PodName: "web"}
+	idx := uint32(0)
+	k := func(flags uint32) *conntrackpb.Key {
+		return &conntrackpb.Key{SourceIp: "10.0.0.1", DestinationIp: "10.0.0.2", Protocol: 6, Flags: flags}
+	}
+
+	responses := make(chan *PeerResponse, 4)
+	responses <- peerResp("node-a", endpointResp(0, web))
+	responses <- peerResp("node-a", entryResp(&conntrackpb.Entry{Key: k(ctstats.TupleFlagIn), SourceEndpointIndex: &idx}))
+	responses <- peerResp("node-b", entryResp(&conntrackpb.Entry{Key: k(0)}))
+	close(responses)
+
+	snap := mergeConntrackResponses(responses)
+	entries := slices.Collect(snap.Entries())
+	require.Len(t, entries, 1)
+	require.Zero(t, entries[0].GetKey().GetFlags())
+	require.EqualValues(t, 0, entries[0].GetSourceEndpointIndex())
+	require.Nil(t, entries[0].DestinationEndpointIndex)
 }
 
 func TestExporterCache(t *testing.T) {
 	var fetches atomic.Int32
-	fetch := func(ctx context.Context) (<-chan *conntrackpb.GetStatsResponse, func() error) {
+	fetch := func(ctx context.Context) (<-chan *PeerResponse, func() error) {
 		fetches.Add(1)
-		ch := make(chan *conntrackpb.GetStatsResponse, 1)
-		ch <- &conntrackpb.GetStatsResponse{ResponseTypes: &conntrackpb.GetStatsResponse_Entry{
-			Entry: &conntrackpb.Entry{
-				Key:   &conntrackpb.Key{SourceIp: "10.0.0.1", DestinationIp: "10.0.0.2"},
-				Value: &conntrackpb.Value{RxPackets: 1},
-			},
-		}}
+		ch := make(chan *PeerResponse, 1)
+		ch <- peerResp("node-a", entryResp(&conntrackpb.Entry{
+			Key:   &conntrackpb.Key{SourceIp: "10.0.0.1", DestinationIp: "10.0.0.2"},
+			Value: &conntrackpb.Value{RxPackets: 1},
+		}))
 		close(ch)
 		return ch, func() error { return nil }
 	}
@@ -252,9 +347,9 @@ func TestExporterCache(t *testing.T) {
 
 func TestExporterCache_ErrorNotCached(t *testing.T) {
 	var fetches atomic.Int32
-	fetch := func(ctx context.Context) (<-chan *conntrackpb.GetStatsResponse, func() error) {
+	fetch := func(ctx context.Context) (<-chan *PeerResponse, func() error) {
 		fetches.Add(1)
-		ch := make(chan *conntrackpb.GetStatsResponse)
+		ch := make(chan *PeerResponse)
 		close(ch)
 		return ch, func() error { return errors.New("boom") }
 	}

@@ -259,6 +259,14 @@ func (s *Server) GetConntrackStats(req *conntrackpb.GetStatsRequest, stream obse
 		return err
 	}
 
+	for ep := range snap.Endpoints() {
+		if err := stream.Send(&conntrackpb.GetStatsResponse{
+			ResponseTypes: &conntrackpb.GetStatsResponse_Endpoint{Endpoint: ep},
+		}); err != nil {
+			return err
+		}
+	}
+
 	for e := range snap.Entries() {
 		if err := stream.Send(&conntrackpb.GetStatsResponse{
 			ResponseTypes: &conntrackpb.GetStatsResponse_Entry{Entry: e},
@@ -278,7 +286,7 @@ func (s *Server) GetConntrackStats(req *conntrackpb.GetStatsRequest, stream obse
 // fetchConntrackSnapshots fans out a GetConntrackStats call to every
 // reachable peer and streams each response onto the returned
 // channel as soon as it is received, rather than buffering it.
-func (s *Server) fetchConntrackSnapshots(ctx context.Context) (<-chan *conntrackpb.GetStatsResponse, func() error) {
+func (s *Server) fetchConntrackSnapshots(ctx context.Context) (<-chan *ctstats.PeerResponse, func() error) {
 	if md, ok := metadata.FromIncomingContext(ctx); ok {
 		ctx = metadata.NewOutgoingContext(ctx, md)
 	}
@@ -286,7 +294,7 @@ func (s *Server) fetchConntrackSnapshots(ctx context.Context) (<-chan *conntrack
 
 	g, gctx := errgroup.WithContext(ctx)
 	peers := s.peers.List()
-	entries := make(chan *conntrackpb.GetStatsResponse, len(peers))
+	entries := make(chan *ctstats.PeerResponse, len(peers))
 	req := &conntrackpb.GetStatsRequest{}
 
 	for _, p := range peers {
@@ -309,7 +317,7 @@ func (s *Server) fetchConntrackSnapshots(ctx context.Context) (<-chan *conntrack
 					logfields.Peer, p.Name,
 				)
 				select {
-				case entries <- conntrackNodeStatusError(err, p.Name):
+				case entries <- &ctstats.PeerResponse{Peer: p.Name, Response: conntrackNodeStatusError(err, p.Name)}:
 				case <-gctx.Done():
 				}
 				return nil
@@ -326,13 +334,13 @@ func (s *Server) fetchConntrackSnapshots(ctx context.Context) (<-chan *conntrack
 						logfields.Peer, p.Name,
 					)
 					select {
-					case entries <- conntrackNodeStatusError(err, p.Name):
+					case entries <- &ctstats.PeerResponse{Peer: p.Name, Response: conntrackNodeStatusError(err, p.Name)}:
 					case <-gctx.Done():
 					}
 					return nil
 				}
 				select {
-				case entries <- resp:
+				case entries <- &ctstats.PeerResponse{Peer: p.Name, Response: resp}:
 				case <-gctx.Done():
 					return gctx.Err()
 				}
