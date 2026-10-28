@@ -24,6 +24,7 @@ import (
 
 	cmtypes "github.com/cilium/cilium/pkg/clustermesh/types"
 	"github.com/cilium/cilium/pkg/controller"
+	"github.com/cilium/cilium/pkg/ctstats"
 	"github.com/cilium/cilium/pkg/datapath/tables"
 	"github.com/cilium/cilium/pkg/defaults"
 	"github.com/cilium/cilium/pkg/endpoint"
@@ -79,6 +80,7 @@ type parameters struct {
 	SignalManager           SignalHandler
 	CTMaps                  ctmap.CTMaps
 	StatsMaps               ctmap.StatsMaps
+	StatsCache              *ctstats.Cache
 
 	// AdditionalCTMaps contains optional additional CT maps that should be garbage collected.
 	// Provide a AdditionalCTMapsOut struct to inject them.
@@ -214,10 +216,16 @@ func newGC(params parameters) *GC {
 		job.OneShot("enable-gc", enableGCFunc))
 
 	if m4 := gc.statsMaps.StatsMapForFamily(false); m4 != nil {
-		params.JobGroup.Add(job.Observer("ct-stats-prune4", func(ctx context.Context, event ctmap.GCEvent) error { ctmap.PruneStatsEntry(m4, event); return nil }, gc.Observe4()))
+		params.JobGroup.Add(job.Observer("ct-stats-prune4", func(ctx context.Context, event ctmap.GCEvent) error {
+			ctmap.PruneStatsEntry(m4, event, params.StatsCache)
+			return nil
+		}, gc.Observe4()))
 	}
 	if m6 := gc.statsMaps.StatsMapForFamily(true); m6 != nil {
-		params.JobGroup.Add(job.Observer("ct-stats-prune6", func(ctx context.Context, event ctmap.GCEvent) error { ctmap.PruneStatsEntry(m6, event); return nil }, gc.Observe6()))
+		params.JobGroup.Add(job.Observer("ct-stats-prune6", func(ctx context.Context, event ctmap.GCEvent) error {
+			ctmap.PruneStatsEntry(m6, event, params.StatsCache)
+			return nil
+		}, gc.Observe6()))
 	}
 
 	return gc

@@ -8,12 +8,15 @@ import (
 	"slices"
 
 	"github.com/cilium/hive/cell"
+	"github.com/spf13/pflag"
 
 	"github.com/cilium/cilium/pkg/bpf"
+	"github.com/cilium/cilium/pkg/ctstats"
 	"github.com/cilium/cilium/pkg/datapath/linux/config/defines"
 	"github.com/cilium/cilium/pkg/maps/nat"
 	"github.com/cilium/cilium/pkg/metrics"
 	"github.com/cilium/cilium/pkg/option"
+	"github.com/cilium/cilium/pkg/time"
 )
 
 // Cell provides the ctmap.Map which contains the connection tracking state.
@@ -21,7 +24,8 @@ var Cell = cell.Module(
 	"ct-map",
 	"eBPF map which manages connection tracking",
 
-	cell.Provide(newCTMaps, newCTStatsMaps),
+	cell.Config(defaultStatsConfig),
+	cell.Provide(newCTMaps, newCTStatsMaps, newStatsCache),
 	cell.Invoke(registerStatsCollector),
 )
 
@@ -175,4 +179,27 @@ func (s *statsMaps) close() error {
 		}
 	}
 	return nil
+}
+
+type statsConfig struct {
+	ConntrackStatsCacheTTL time.Duration `mapstructure:"bpf-ct-stats-cache-ttl"`
+}
+
+// maxPrunedStats caps the pruned connections retained between two cache refreshes.
+const maxPrunedStats = 65536
+
+var defaultStatsConfig = statsConfig{ConntrackStatsCacheTTL: 30 * time.Second}
+
+func (c statsConfig) Flags(flags *pflag.FlagSet) {
+	flags.Duration("bpf-ct-stats-cache-ttl", c.ConntrackStatsCacheTTL,
+		"Duration for which the connection tracking packet/byte accounting stats are cached")
+}
+
+// newStatsCache returns the cache of the CT stats, or nil if the
+// stats are disabled.
+func newStatsCache(cfg statsConfig, daemonCfg *option.DaemonConfig, maps StatsMaps) *ctstats.Cache {
+	if !daemonCfg.BPFConntrackStats {
+		return nil
+	}
+	return ctstats.New(newStatsSource(maps), cfg.ConntrackStatsCacheTTL, max(maxPrunedStats, daemonCfg.CTStatsMapEntries/2))
 }

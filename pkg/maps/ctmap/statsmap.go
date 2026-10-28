@@ -4,8 +4,10 @@
 package ctmap
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
+	"net/netip"
 	"strings"
 	"unsafe"
 
@@ -13,10 +15,11 @@ import (
 	"github.com/cilium/cilium/pkg/ctstats"
 	"github.com/cilium/cilium/pkg/datapath/linux/probes"
 	"github.com/cilium/cilium/pkg/ebpf"
-	"github.com/cilium/cilium/pkg/lock"
 	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/cilium/cilium/pkg/metrics"
 	"github.com/cilium/cilium/pkg/option"
+	"github.com/cilium/cilium/pkg/u8proto"
+
 	ciliumebpf "github.com/cilium/ebpf"
 	"github.com/prometheus/client_golang/prometheus"
 )
@@ -248,7 +251,7 @@ func (m statsMapType) value() bpf.MapValue {
 // PruneStatsEntry deletes the stats entry matching a pruned CT entry
 // (identified by event.Key) so that the accounting side maps never outlive
 // the CT entries they describe.
-func PruneStatsEntry(statsMap StatsMap, event GCEvent) {
+func PruneStatsEntry(statsMap StatsMap, event GCEvent, cache *ctstats.Cache) {
 	if statsMap == nil {
 		return
 	}
@@ -256,6 +259,10 @@ func PruneStatsEntry(statsMap StatsMap, event GCEvent) {
 	value, ok, err := statsMap.LookupAndDelete(event.Key)
 	if err != nil || !ok {
 		return
+	}
+
+	if t, ok := ctKeyToTuple(event.Key); ok {
+		cache.RecordPruned(t, ctStatsToValue(value))
 	}
 
 	if event.Key.GetFlags()&TUPLE_F_SERVICE != 0 {
@@ -276,23 +283,87 @@ func PruneStatsEntry(statsMap StatsMap, event GCEvent) {
 	metrics.ConntrackStatsGCPackets.WithLabelValues(family, protocol, metricsDeleted, metricsEgress).Add(float64(value.TxPackets))
 }
 
-// statsCollector is a prometheus.Collector that scans the CT stats maps at
-// scrape time to expose the alive packet/byte/entry counts.
+// ctKeyToTuple converts a stats map key into the canonical client -> server
+// tuple. The datapath stores keys reversed, but differently per flag:
+//   - IN/OUT: addresses are swapped, ports are not.
+//   - SERVICE: addresses are not swapped, ports are.
+func ctKeyToTuple(key CtKey) (ctstats.Tuple, bool) {
+	var src, dst netip.Addr
+	var srcPort, dstPort uint16
+	var proto, flags uint8
+
+	switch k := key.ToHost().(type) {
+	case *CtKey4Global:
+		src, dst = k.SourceAddr.Addr(), k.DestAddr.Addr()
+		srcPort, dstPort = k.SourcePort, k.DestPort
+		proto, flags = uint8(k.NextHeader), k.Flags
+	case *CtKey6Global:
+		src, dst = k.SourceAddr.Addr(), k.DestAddr.Addr()
+		srcPort, dstPort = k.SourcePort, k.DestPort
+		proto, flags = uint8(k.NextHeader), k.Flags
+	default:
+		return ctstats.Tuple{}, false
+	}
+
+	if flags&TUPLE_F_SERVICE != 0 {
+		srcPort, dstPort = dstPort, srcPort
+	} else {
+		src, dst = dst, src
+	}
+
+	return ctstats.Tuple{Src: src, Dst: dst, SrcPort: srcPort, DstPort: dstPort, Proto: proto, Flags: flags}, true
+}
+
+func ctStatsToValue(stats *CtStats) ctstats.Value {
+	return ctstats.Value{
+		RxBytes:   stats.RxBytes,
+		TxBytes:   stats.TxBytes,
+		RxPackets: stats.RxPackets,
+		TxPackets: stats.TxPackets,
+	}
+}
+
+func newStatsSource(maps StatsMaps) ctstats.Source {
+	return func(ctx context.Context, yield func(ctstats.Tuple, ctstats.Value) bool) error {
+		for _, ipv6 := range []bool{false, true} {
+			m := maps.StatsMapForFamily(ipv6)
+			if m == nil {
+				continue
+			}
+			var stop bool
+			err := m.DumpWithCallback(func(key StatsKey, value *CtStats) bool {
+				if t, ok := ctKeyToTuple(key); ok {
+					stop = !yield(t, ctStatsToValue(value))
+				}
+				return !stop
+			})
+			if err != nil {
+				return fmt.Errorf("failed to dump %s: %w", m.Name(), err)
+			}
+			if stop {
+				return nil
+			}
+		}
+		return nil
+	}
+}
+
+// statsCollector is a prometheus.Collector exposing the alive packet/byte/entry
+// counts from the ctstats cache, so the stats maps are only scanned (at most once
+// per cache TTL) when the metrics endpoint is queried.
 type statsCollector struct {
 	logger *slog.Logger
-	maps   StatsMaps
-
-	mutex lock.Mutex
+	cache  *ctstats.Cache
 
 	bytesDesc   *prometheus.Desc
 	packetsDesc *prometheus.Desc
 	entriesDesc *prometheus.Desc
 }
 
-func newStatsCollector(logger *slog.Logger, maps StatsMaps) *statsCollector {
+func newStatsCollector(logger *slog.Logger, cache *ctstats.Cache) *statsCollector {
 	return &statsCollector{
 		logger: logger,
-		maps:   maps,
+		cache:  cache,
 		bytesDesc: prometheus.NewDesc(
 			prometheus.BuildFQName(metrics.Namespace, metrics.SubsystemDatapath, "conntrack_stats_bytes"),
 			"Current number of bytes accounted for by alive connection tracking entries "+
@@ -321,74 +392,60 @@ func (c *statsCollector) Describe(ch chan<- *prometheus.Desc) {
 }
 
 func (c *statsCollector) Collect(ch chan<- prometheus.Metric) {
-	c.mutex.Lock()
-	defer c.mutex.Unlock()
-
-	for _, ipv6 := range []bool{false, true} {
-		statsMap := c.maps.StatsMapForFamily(ipv6)
-		if statsMap == nil {
-			continue
-		}
-		if err := c.collectMap(statsMap, ch); err != nil {
-			c.logger.Warn("Failed to collect CT stats metrics",
-				logfields.Error, err,
-				logfields.Name, statsMap.Name(),
-			)
-		}
-	}
-}
-
-// collectMap collects the CT stats from the given statsMap and sends them to the Prometheus channel.
-func (c *statsCollector) collectMap(statsMap StatsMap, ch chan<- prometheus.Metric) error {
-	var (
-		tcpTotal, nontcpTotal     CtStats
-		tcpEntries, nontcpEntries uint
-	)
-
-	err := statsMap.DumpWithCallback(func(k StatsKey, v *CtStats) bool {
-		// A service entry accounts again the packets of its backend entry.
-		if k.GetFlags()&TUPLE_F_SERVICE != 0 {
-			return true
-		}
-		if isKeyTCP(k) {
-			tcpTotal.Add(v)
-			tcpEntries++
-		} else {
-			nontcpTotal.Add(v)
-			nontcpEntries++
-		}
-		return true
-	})
+	snapshot, err := c.cache.Snapshot(context.Background())
 	if err != nil {
-		return fmt.Errorf("failed to dump %s: %w", statsMap.Name(), err)
+		c.logger.Warn("Failed to refresh CT stats", logfields.Error, err)
 	}
-
-	family := statsMap.Family()
-	for _, p := range []struct {
-		protocol string
-		total    CtStats
-		entries  uint
-	}{
-		{gcProtocolTCP.String(), tcpTotal, tcpEntries},
-		{gcProtocolAny.String(), nontcpTotal, nontcpEntries},
-	} {
-		ch <- prometheus.MustNewConstMetric(c.bytesDesc, prometheus.GaugeValue, float64(p.total.RxBytes), family, p.protocol, metricsAlive, metricsIngress)
-		ch <- prometheus.MustNewConstMetric(c.bytesDesc, prometheus.GaugeValue, float64(p.total.TxBytes), family, p.protocol, metricsAlive, metricsEgress)
-		ch <- prometheus.MustNewConstMetric(c.packetsDesc, prometheus.GaugeValue, float64(p.total.RxPackets), family, p.protocol, metricsAlive, metricsIngress)
-		ch <- prometheus.MustNewConstMetric(c.packetsDesc, prometheus.GaugeValue, float64(p.total.TxPackets), family, p.protocol, metricsAlive, metricsEgress)
-		ch <- prometheus.MustNewConstMetric(c.entriesDesc, prometheus.GaugeValue, float64(p.entries), family, metricsAlive, p.protocol)
-	}
-	return nil
-}
-
-func registerStatsCollector(logger *slog.Logger, daemonCfg *option.DaemonConfig, registry *metrics.Registry, maps StatsMaps) {
-	if !daemonCfg.BPFConntrackStats {
-		logger.Info("BPFConntrackStats is disabled, skipping CT stats collector registration. " +
-			"cilium_datapath_conntrack_stats metrics will not be collected")
+	if snapshot == nil {
 		return
 	}
 
-	if err := registry.Register(newStatsCollector(logger, maps)); err != nil {
+	type group struct {
+		family, protocol string
+	}
+	type total struct {
+		ctstats.Value
+		entries uint
+	}
+	totals := make(map[group]*total)
+	for _, family := range []string{mapTypeStats4.family(), mapTypeStats6.family()} {
+		for _, protocol := range []gcProtocol{gcProtocolTCP, gcProtocolAny} {
+			totals[group{family, protocol.String()}] = &total{}
+		}
+	}
+
+	for t, e := range snapshot.Deduplicated() {
+		// A service entry accounts again the packets of its backend entry.
+		if !e.Alive || t.Flags&ctstats.TupleFlagService != 0 {
+			continue
+		}
+		family := mapTypeStats4.family()
+		if t.Src.Is6() {
+			family = mapTypeStats6.family()
+		}
+		protocol := gcProtocolAny
+		if u8proto.U8proto(t.Proto) == u8proto.TCP {
+			protocol = gcProtocolTCP
+		}
+		tot := totals[group{family, protocol.String()}]
+		tot.Add(e.Value)
+		tot.entries++
+	}
+
+	for g, t := range totals {
+		ch <- prometheus.MustNewConstMetric(c.bytesDesc, prometheus.GaugeValue, float64(t.RxBytes), g.family, g.protocol, metricsAlive, metricsIngress)
+		ch <- prometheus.MustNewConstMetric(c.bytesDesc, prometheus.GaugeValue, float64(t.TxBytes), g.family, g.protocol, metricsAlive, metricsEgress)
+		ch <- prometheus.MustNewConstMetric(c.packetsDesc, prometheus.GaugeValue, float64(t.RxPackets), g.family, g.protocol, metricsAlive, metricsIngress)
+		ch <- prometheus.MustNewConstMetric(c.packetsDesc, prometheus.GaugeValue, float64(t.TxPackets), g.family, g.protocol, metricsAlive, metricsEgress)
+		ch <- prometheus.MustNewConstMetric(c.entriesDesc, prometheus.GaugeValue, float64(t.entries), g.family, metricsAlive, g.protocol)
+	}
+}
+
+func registerStatsCollector(logger *slog.Logger, daemonCfg *option.DaemonConfig, registry *metrics.Registry, cache *ctstats.Cache) {
+	if !daemonCfg.BPFConntrackStats || cache == nil {
+		return
+	}
+	if err := registry.Register(newStatsCollector(logger, cache)); err != nil {
 		logger.Error("Failed to register CT stats collector to Prometheus registry. "+
 			"cilium_datapath_conntrack_stats metrics will not be collected",
 			logfields.Error, err,

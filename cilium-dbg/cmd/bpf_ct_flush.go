@@ -74,10 +74,10 @@ func flushCt() {
 	observable6.Observe(context.Background(), ctmap.NatMapNext6, func(error) {})
 
 	if stats4 != nil {
-		observable4.Observe(context.Background(), func(event ctmap.GCEvent) { ctmap.PruneStatsEntry(stats4, event) }, func(error) {})
+		observable4.Observe(context.Background(), func(event ctmap.GCEvent) { ctmap.PruneStatsEntry(stats4, event, nil) }, func(error) {})
 	}
 	if stats6 != nil {
-		observable6.Observe(context.Background(), func(event ctmap.GCEvent) { ctmap.PruneStatsEntry(stats6, event) }, func(error) {})
+		observable6.Observe(context.Background(), func(event ctmap.GCEvent) { ctmap.PruneStatsEntry(stats6, event, nil) }, func(error) {})
 	}
 
 	for _, m := range maps {
