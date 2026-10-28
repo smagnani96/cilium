@@ -10,6 +10,7 @@ import (
 	"unsafe"
 
 	"github.com/cilium/cilium/pkg/bpf"
+	"github.com/cilium/cilium/pkg/ctstats"
 	"github.com/cilium/cilium/pkg/datapath/linux/probes"
 	"github.com/cilium/cilium/pkg/ebpf"
 	"github.com/cilium/cilium/pkg/lock"
@@ -18,6 +19,12 @@ import (
 	"github.com/cilium/cilium/pkg/option"
 	ciliumebpf "github.com/cilium/ebpf"
 	"github.com/prometheus/client_golang/prometheus"
+)
+
+// Fails to compile if the ctstats flags diverge from the TUPLE_F_* ones.
+var (
+	_ = [1]struct{}{}[ctstats.TupleFlagIn-TUPLE_F_IN]
+	_ = [1]struct{}{}[ctstats.TupleFlagService-TUPLE_F_SERVICE]
 )
 
 const (
