@@ -607,17 +607,19 @@ Name                                             Labels             Default    D
 Datapath
 ~~~~~~~~
 
-============================================= ================================================== ========== ========================================================
-Name                                          Labels                                             Default    Description
-============================================= ================================================== ========== ========================================================
-``datapath_conntrack_dump_resets_total``      ``area``, ``name``, ``family``                     Enabled    Number of conntrack dump resets. Happens when a BPF entry gets removed while dumping the map is in progress.
-``datapath_conntrack_gc_runs_total``          ``family``, ``protocol``, ``status``               Enabled    Number of times that the conntrack garbage collector process was run
-``datapath_conntrack_gc_key_fallbacks_total`` ``family``, ``protocol``                           Enabled    Number of times a key fallback was needed when iterating over the BPF map
-``datapath_conntrack_gc_entries``             ``family``, ``protocol``, ``status``               Enabled    The number of alive and deleted conntrack entries at the end of a garbage collector run
-``datapath_conntrack_gc_duration_seconds``    ``family``, ``protocol``, ``status``               Enabled    Duration in seconds of the garbage collector process
-``device_bytes_total``                        ``device``, ``direction``                          Enabled    Total number of bytes seen on a Cilium-managed device, tagged by ingress/egress direction
-``device_packets_total``                      ``device``, ``direction``                          Enabled    Total number of packets seen on a Cilium-managed device, tagged by ingress/egress direction
-============================================= ================================================== ========== ========================================================
+============================================= =================================================== ========== ========================================================
+Name                                          Labels                                              Default    Description
+============================================= =================================================== ========== ========================================================
+``datapath_conntrack_dump_resets_total``      ``area``, ``name``, ``family``                      Enabled    Number of conntrack dump resets. Happens when a BPF entry gets removed while dumping the map is in progress.
+``datapath_conntrack_gc_runs_total``          ``family``, ``protocol``, ``status``                Enabled    Number of times that the conntrack garbage collector process was run
+``datapath_conntrack_gc_key_fallbacks_total`` ``family``, ``protocol``                            Enabled    Number of times a key fallback was needed when iterating over the BPF map
+``datapath_conntrack_gc_entries``             ``family``, ``protocol``, ``status``                Enabled    The number of alive and deleted conntrack entries at the end of a garbage collector run
+``datapath_conntrack_gc_duration_seconds``    ``family``, ``protocol``, ``status``                Enabled    Duration in seconds of the garbage collector process
+``datapath_conntrack_stats_gc_packets_total`` ``family``, ``protocol``, ``status``, ``direction`` Disabled   Cumulative number of packets accounted for by connection tracking entries (requires ``--bpf-ct-stats``)
+``datapath_conntrack_stats_gc_bytes_total``   ``family``, ``protocol``, ``status``, ``direction`` Disabled   Cumulative number of bytes accounted for by connection tracking entries (requires ``--bpf-ct-stats``)
+``device_bytes_total``                        ``device``, ``direction``                           Enabled    Total number of bytes seen on a Cilium-managed device, tagged by ingress/egress direction
+``device_packets_total``                      ``device``, ``direction``                           Enabled    Total number of packets seen on a Cilium-managed device, tagged by ingress/egress direction
+============================================= =================================================== ========== ========================================================
 
 IPsec
 ~~~~~

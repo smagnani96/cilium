@@ -406,6 +406,16 @@ var (
 	// ConntrackDumpReset marks the count for conntrack dump resets
 	ConntrackDumpResets = NoOpCounterVec
 
+	// ConntrackStatsGCPackets is the cumulative number of packets of all
+	// connection tracking entries removed during GC, labeled by address family,
+	// protocol, status (always deleted) and direction.
+	ConntrackStatsGCPackets = NoOpCounterVec
+
+	// ConntrackStatsGCBytes is the cumulative number of bytes of all
+	// connection tracking entries removed during GC, labeled by address family,
+	// protocol, status (always deleted) and direction.
+	ConntrackStatsGCBytes = NoOpCounterVec
+
 	// Signals
 
 	// SignalsHandled is the number of signals received.
@@ -675,6 +685,8 @@ type LegacyMetrics struct {
 	ConntrackGCDuration                     metric.Vec[metric.Observer]
 	ConntrackInterval                       metric.Vec[metric.Gauge]
 	ConntrackDumpResets                     metric.Vec[metric.Counter]
+	ConntrackStatsGCPackets                 metric.Vec[metric.Counter]
+	ConntrackStatsGCBytes                   metric.Vec[metric.Counter]
 	SignalsHandled                          metric.Vec[metric.Counter]
 	ServicesEventsCount                     metric.Vec[metric.Counter]
 	ServiceImplementationDelay              metric.Vec[metric.Observer]
@@ -985,6 +997,28 @@ func NewLegacyMetrics() *LegacyMetrics {
 			Name:       "conntrack_dump_resets_total",
 			Help:       "Number of conntrack dump resets. Happens when a BPF entry gets removed while dumping the map is in progress",
 		}, []string{LabelDatapathArea, LabelDatapathName, LabelDatapathFamily}),
+
+		ConntrackStatsGCPackets: metric.NewCounterVec(metric.CounterOpts{
+			ConfigName: Namespace + "_" + SubsystemDatapath + "_conntrack_stats_gc_packets_total",
+			Disabled:   true,
+			Namespace:  Namespace,
+			Subsystem:  SubsystemDatapath,
+			Name:       "conntrack_stats_gc_packets_total",
+			Help: "Cumulative number of packets of all connection tracking entries " +
+				"removed during GC, labeled by address family, protocol, status " +
+				"(always deleted) and direction",
+		}, []string{LabelDatapathFamily, LabelProtocol, LabelStatus, LabelDirection}),
+
+		ConntrackStatsGCBytes: metric.NewCounterVec(metric.CounterOpts{
+			ConfigName: Namespace + "_" + SubsystemDatapath + "_conntrack_stats_gc_bytes_total",
+			Disabled:   true,
+			Namespace:  Namespace,
+			Subsystem:  SubsystemDatapath,
+			Name:       "conntrack_stats_gc_bytes_total",
+			Help: "Cumulative number of bytes of all connection tracking entries " +
+				"removed during GC, labeled by datapath family, protocol, status " +
+				"(always deleted), and direction",
+		}, []string{LabelDatapathFamily, LabelProtocol, LabelStatus, LabelDirection}),
 
 		SignalsHandled: metric.NewCounterVec(metric.CounterOpts{
 			ConfigName: Namespace + "_" + SubsystemDatapath + "_signals_handled_total",
@@ -1360,6 +1394,8 @@ func NewLegacyMetrics() *LegacyMetrics {
 	ConntrackGCDuration = lm.ConntrackGCDuration
 	ConntrackInterval = lm.ConntrackInterval
 	ConntrackDumpResets = lm.ConntrackDumpResets
+	ConntrackStatsGCPackets = lm.ConntrackStatsGCPackets
+	ConntrackStatsGCBytes = lm.ConntrackStatsGCBytes
 	SignalsHandled = lm.SignalsHandled
 	ServicesEventsCount = lm.ServicesEventsCount
 	ServiceImplementationDelay = lm.ServiceImplementationDelay

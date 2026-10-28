@@ -11,6 +11,7 @@ import (
 	"github.com/cilium/cilium/pkg/bpf"
 	"github.com/cilium/cilium/pkg/datapath/linux/probes"
 	"github.com/cilium/cilium/pkg/ebpf"
+	"github.com/cilium/cilium/pkg/metrics"
 	ciliumebpf "github.com/cilium/ebpf"
 )
 
@@ -233,5 +234,21 @@ func PruneStatsEntry(statsMap StatsMap, event GCEvent) {
 		return
 	}
 
-	statsMap.LookupAndDelete(event.Key)
+	value, ok, err := statsMap.LookupAndDelete(event.Key)
+	if err != nil || !ok {
+		return
+	}
+
+	family := statsMap.Family()
+	var protocol string
+	if isKeyTCP(event.Key) {
+		protocol = gcProtocolTCP.String()
+	} else {
+		protocol = gcProtocolAny.String()
+	}
+
+	metrics.ConntrackStatsGCBytes.WithLabelValues(family, protocol, metricsDeleted, metricsIngress).Add(float64(value.RxBytes))
+	metrics.ConntrackStatsGCBytes.WithLabelValues(family, protocol, metricsDeleted, metricsEgress).Add(float64(value.TxBytes))
+	metrics.ConntrackStatsGCPackets.WithLabelValues(family, protocol, metricsDeleted, metricsIngress).Add(float64(value.RxPackets))
+	metrics.ConntrackStatsGCPackets.WithLabelValues(family, protocol, metricsDeleted, metricsEgress).Add(float64(value.TxPackets))
 }

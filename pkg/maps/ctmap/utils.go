@@ -12,6 +12,7 @@ import (
 	"github.com/cilium/cilium/pkg/bpf"
 	"github.com/cilium/cilium/pkg/maps/nat"
 	"github.com/cilium/cilium/pkg/tuple"
+	"github.com/cilium/cilium/pkg/u8proto"
 )
 
 // NOTE: the function does NOT copy addr fields, so it's not safe to
@@ -157,4 +158,15 @@ func iterate[KT any, VT any, KP bpf.KeyPointer[KT], VP bpf.ValuePointer[VT]](m *
 		filterCallback(k, v)
 	}
 	return errFn()
+}
+
+func isKeyTCP(key StatsKey) bool {
+	switch k := key.(type) {
+	case *CtKey4Global:
+		return k.NextHeader == u8proto.TCP
+	case *CtKey6Global:
+		return k.NextHeader == u8proto.TCP
+	default:
+		return false
+	}
 }

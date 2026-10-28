@@ -201,6 +201,17 @@ func (r *Registry) registerMetrics() {
 		metricFlags = append(metricFlags, "+"+Namespace+"_"+SubsystemFQDN+"_semaphore_rejected_total")
 	}
 
+	// The CT stats metrics updated when pruning stats entries only make sense
+	// when the BPF conntrack stats are enabled.
+	if r.params.DaemonConfig.BPFConntrackStats {
+		metricFlags = append(metricFlags,
+			"+"+Namespace+"_"+SubsystemDatapath+"_conntrack_stats_gc_packets_total",
+			"+"+Namespace+"_"+SubsystemDatapath+"_conntrack_stats_gc_bytes_total",
+		)
+	} else {
+		r.params.Logger.Info("BPFConntrackStats is disabled, cilium_datapath_conntrack_stats_gc metrics will not be collected")
+	}
+
 	for _, metricFlag := range metricFlags {
 		metricFlag = strings.TrimSpace(metricFlag)
 
