@@ -328,6 +328,10 @@
      - Configure the maximum number of entries for the non-TCP connection tracking table.
      - int
      - ``262144``
+   * - :spelling:ignore:`bpf.ctStats.cacheTTL`
+     - Duration for which the connection tracking packet/byte accounting stats are cached in the agent, to avoid walking the BPF stats maps on every consumer access (e.g. Prometheus scrape). Requires bpf.ctStats.enabled.
+     - string
+     - ``"30s"``
    * - :spelling:ignore:`bpf.ctStats.enabled`
      - Enable CT per-direction stats for packets and bytes
      - bool

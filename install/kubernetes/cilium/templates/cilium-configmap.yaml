@@ -482,6 +482,9 @@ data:
 {{- if .Values.bpf.ctStats.mapMax }}
   bpf-ct-stats-map-max: "{{ .Values.bpf.ctStats.mapMax | int }}"
 {{- end }}
+{{- if .Values.bpf.ctStats.cacheTTL }}
+  bpf-ct-stats-cache-ttl: {{ .Values.bpf.ctStats.cacheTTL | quote }}
+{{- end }}
 {{- if .Values.bpf.natMax }}
   # bpf-nat-global-max specified the maximum number of entries in the
   # BPF NAT table.

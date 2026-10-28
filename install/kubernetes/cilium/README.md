@@ -132,6 +132,7 @@ contributors across the globe, there is almost always someone available to help.
 | bpf.autoMount.enabled | bool | `true` | Enable automatic mount of BPF filesystem When `autoMount` is enabled, the BPF filesystem is mounted at `bpf.root` path on the underlying host and inside the cilium agent pod. If users disable `autoMount`, it's expected that users have mounted bpffs filesystem at the specified `bpf.root` volume, and then the volume will be mounted inside the cilium agent pod at the same path. |
 | bpf.ctAccounting | bool | `false` | Enable CT accounting for packets and bytes |
 | bpf.ctAnyMax | int | `262144` | Configure the maximum number of entries for the non-TCP connection tracking table. |
+| bpf.ctStats.cacheTTL | string | `"30s"` | Duration for which the connection tracking packet/byte accounting stats are cached in the agent, to avoid walking the BPF stats maps on every consumer access (e.g. Prometheus scrape). Requires bpf.ctStats.enabled. |
 | bpf.ctStats.enabled | bool | `false` | Enable CT per-direction stats for packets and bytes |
 | bpf.ctStats.mapMax | int | auto-sized to the connection tracking table sizes | Configure the maximum number of entries in the connection tracking stats maps. When unset, it is auto-sized to match the combined TCP and non-TCP connection tracking table sizes. |
 | bpf.ctTcpMax | int | `524288` | Configure the maximum number of entries in the TCP connection tracking table. |

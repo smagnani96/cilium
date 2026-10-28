@@ -582,6 +582,14 @@ bpf:
     # connection tracking table sizes.
     # @default -- auto-sized to the connection tracking table sizes
     mapMax: ~
+    # @schema
+    # type: [null, string]
+    # @schema
+    # -- (string) Duration for which the connection tracking packet/byte accounting
+    # stats are cached in the agent, to avoid walking the BPF stats maps on every
+    # consumer access (e.g. Prometheus scrape). Requires bpf.ctStats.enabled.
+    # @default -- `"30s"`
+    cacheTTL: ~
   # @schema
   # type: [null, integer]
   # @schema

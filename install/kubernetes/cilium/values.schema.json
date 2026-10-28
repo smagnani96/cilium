@@ -536,6 +536,12 @@
         },
         "ctStats": {
           "properties": {
+            "cacheTTL": {
+              "type": [
+                "null",
+                "string"
+              ]
+            },
             "enabled": {
               "type": "boolean"
             },
