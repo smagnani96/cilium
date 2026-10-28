@@ -10,6 +10,7 @@ import (
 	"github.com/cilium/hive/cell"
 
 	"github.com/cilium/cilium/pkg/bpf"
+	"github.com/cilium/cilium/pkg/datapath/linux/config/defines"
 	"github.com/cilium/cilium/pkg/maps/nat"
 	"github.com/cilium/cilium/pkg/metrics"
 	"github.com/cilium/cilium/pkg/option"
@@ -20,7 +21,7 @@ var Cell = cell.Module(
 	"ct-map",
 	"eBPF map which manages connection tracking",
 
-	cell.Provide(newCTMaps),
+	cell.Provide(newCTMaps, newCTStatsMaps),
 )
 
 func newCTMaps(lifecycle cell.Lifecycle, daemonConfig *option.DaemonConfig, registry *metrics.Registry, natMap4 nat.NatMap4, natMap6 nat.NatMap6) bpf.MapOut[CTMaps] {
@@ -87,5 +88,90 @@ func (r *ctMaps) close() error {
 		}
 	}
 
+	return nil
+}
+
+func newCTStatsMaps(in struct {
+	cell.In
+
+	Lifecycle    cell.Lifecycle
+	DaemonConfig *option.DaemonConfig
+}) (out struct {
+	cell.Out
+
+	bpf.MapOut[StatsMaps]
+	defines.NodeOut
+}, err error) {
+	var maps statsMaps
+
+	// CTStatsMapEntries is already fully resolved.
+	maxEntries := in.DaemonConfig.CTStatsMapEntries
+	if in.DaemonConfig.IPv4Enabled() && in.DaemonConfig.BPFConntrackStats {
+		maps.v4StatsMap = newStatsMap(mapTypeStats4, maxEntries)
+	}
+	if in.DaemonConfig.IPv6Enabled() && in.DaemonConfig.BPFConntrackStats {
+		maps.v6StatsMap = newStatsMap(mapTypeStats6, maxEntries)
+	}
+
+	out.NodeDefines = map[string]string{
+		"CT_STATS_MAP_SIZE": fmt.Sprint(maxEntries),
+	}
+
+	in.Lifecycle.Append(cell.Hook{
+		OnStart: func(context cell.HookContext) error {
+			return maps.init()
+		},
+		OnStop: func(context cell.HookContext) error {
+			return maps.close()
+		},
+	})
+
+	out.MapOut = bpf.NewMapOut(StatsMaps(&maps))
+	return
+}
+
+type StatsMaps interface {
+	StatsMapForFamily(ipv6 bool) StatsMap
+}
+
+type statsMaps struct {
+	v4StatsMap *statsMap
+	v6StatsMap *statsMap
+}
+
+func (s *statsMaps) StatsMapForFamily(ipv6 bool) StatsMap {
+	if ipv6 {
+		if s.v6StatsMap == nil {
+			return nil
+		}
+		return s.v6StatsMap
+	}
+	if s.v4StatsMap == nil {
+		return nil
+	}
+	return s.v4StatsMap
+}
+
+func (s *statsMaps) init() error {
+	for _, m := range []*statsMap{s.v4StatsMap, s.v6StatsMap} {
+		if m == nil {
+			continue
+		}
+		if err := m.OpenOrCreate(); err != nil {
+			return fmt.Errorf("failed to open and create %s map: %w", m.Name(), err)
+		}
+	}
+	return nil
+}
+
+func (s *statsMaps) close() error {
+	for _, m := range []*statsMap{s.v4StatsMap, s.v6StatsMap} {
+		if m == nil {
+			continue
+		}
+		if err := m.Close(); err != nil {
+			return fmt.Errorf("failed to close %s map: %w", m.Name(), err)
+		}
+	}
 	return nil
 }

@@ -78,6 +78,7 @@ type parameters struct {
 	NodeAddressing          node.Addressing
 	SignalManager           SignalHandler
 	CTMaps                  ctmap.CTMaps
+	StatsMaps               ctmap.StatsMaps
 
 	// AdditionalCTMaps contains optional additional CT maps that should be garbage collected.
 	// Provide a AdditionalCTMapsOut struct to inject them.
@@ -111,7 +112,8 @@ type GC struct {
 	additionalCTMapsFns []AdditionalCTMapsFunc
 	controllerManager   *controller.Manager
 
-	ctMaps ctmap.CTMaps
+	ctMaps    ctmap.CTMaps
+	statsMaps ctmap.StatsMaps
 
 	observable4 stream.Observable[ctmap.GCEvent]
 	next4       func(ctmap.GCEvent)
@@ -144,6 +146,7 @@ func newGC(params parameters) *GC {
 		endpointsManager: params.EndpointManager,
 		signalHandler:    params.SignalManager,
 		ctMaps:           params.CTMaps,
+		statsMaps:        params.StatsMaps,
 
 		controllerManager: controller.NewManager(),
 
@@ -209,6 +212,13 @@ func newGC(params parameters) *GC {
 		job.Observer("nat-map-next4", func(ctx context.Context, event ctmap.GCEvent) error { ctmap.NatMapNext4(event); return nil }, gc.Observe4()),
 		job.Observer("nat-map-next6", func(ctx context.Context, event ctmap.GCEvent) error { ctmap.NatMapNext6(event); return nil }, gc.Observe6()),
 		job.OneShot("enable-gc", enableGCFunc))
+
+	if m4 := gc.statsMaps.StatsMapForFamily(false); m4 != nil {
+		params.JobGroup.Add(job.Observer("ct-stats-prune4", func(ctx context.Context, event ctmap.GCEvent) error { ctmap.PruneStatsEntry(m4, event); return nil }, gc.Observe4()))
+	}
+	if m6 := gc.statsMaps.StatsMapForFamily(true); m6 != nil {
+		params.JobGroup.Add(job.Observer("ct-stats-prune6", func(ctx context.Context, event ctmap.GCEvent) error { ctmap.PruneStatsEntry(m6, event); return nil }, gc.Observe6()))
+	}
 
 	return gc
 }
