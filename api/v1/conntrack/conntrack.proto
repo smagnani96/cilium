@@ -1,0 +1,53 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright Authors of Hubble
+
+syntax = "proto3";
+
+import "relay/relay.proto";
+
+package conntrack;
+
+option go_package = "github.com/cilium/cilium/api/v1/conntrack";
+
+// GetStatsRequest is the request of the Observer.GetConntrackStats RPC.
+message GetStatsRequest {}
+
+// GetStatsResponse streams the entries themselves, or a status update about
+// the node. When served by Hubble Relay, entries from all the nodes are
+// aggregated and each node's issues are reported as node statuses.
+message GetStatsResponse {
+    oneof response_types {
+        Entry entry = 1;
+        relay.NodeStatusEvent node_status = 2;
+    }
+}
+
+// Entry is an entry from a node's datapath conntrack stats map.
+message Entry {
+    Key key = 1;
+    Value value = 2;
+    State state = 3;
+}
+
+// Key represents the key of a conntrack stats entry.
+message Key {
+    string source_ip = 1;
+    uint32 source_port = 2;
+    string destination_ip = 3;
+    uint32 destination_port = 4;
+    uint32 protocol = 5;
+    uint32 flags = 6;
+}
+
+// Value represents the value of a conntrack stats entry.
+message Value {
+    uint64 rx_packets = 1;
+    uint64 tx_packets = 2;
+    uint64 rx_bytes = 3;
+    uint64 tx_bytes = 4;
+}
+
+// State is the state of the conntrack entry a stats entry belongs to.
+message State {
+    bool alive = 1;
+}

@@ -348,7 +348,7 @@ generate-kvstoremesh-api: api/v1/kvstoremesh/openapi.yaml ## Generate kvstoremes
 	@# sort goimports automatically
 	$(QUIET)$(GO) tool golang.org/x/tools/cmd/goimports -w ./api/v1/kvstoremesh
 
-generate-hubble-api: api/v1/flow/flow.proto api/v1/peer/peer.proto api/v1/observer/observer.proto api/v1/relay/relay.proto ## Generate hubble proto Go sources.
+generate-hubble-api: api/v1/flow/flow.proto api/v1/peer/peer.proto api/v1/observer/observer.proto api/v1/relay/relay.proto api/v1/conntrack/conntrack.proto ## Generate hubble proto Go sources.
 	$(QUIET) $(MAKE) $(SUBMAKEOPTS) -C api/v1
 
 generate-ztunnel-api: pkg/ztunnel/pb/ca_ztunnel.proto pkg/ztunnel/pb/workload_ztunnel.proto pkg/ztunnel/pb/zds_ztunnel.proto

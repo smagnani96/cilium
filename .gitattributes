@@ -57,6 +57,8 @@ api/v1/kvstoremesh/models/** merge=generate-kvstoremesh-api
 api/v1/kvstoremesh/server/** merge=generate-kvstoremesh-api
 
 # Hubble API generate files
+api/v1/conntrack/**.go merge=generate-hubble-api
+api/v1/conntrack/README.md merge=generate-hubble-api
 api/v1/flow/**.go merge=generate-hubble-api
 api/v1/flow/README.md merge=generate-hubble-api
 api/v1/observer/**.go merge=generate-hubble-api
