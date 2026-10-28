@@ -19,6 +19,7 @@ import (
 	"google.golang.org/grpc"
 
 	conntrackpb "github.com/cilium/cilium/api/v1/conntrack"
+	flowpb "github.com/cilium/cilium/api/v1/flow"
 	observerpb "github.com/cilium/cilium/api/v1/observer"
 	"github.com/cilium/cilium/hubble/cmd/common/config"
 	"github.com/cilium/cilium/hubble/cmd/common/conn"
@@ -69,7 +70,10 @@ func runListCTStats(ctx context.Context, cmd *cobra.Command, conn *grpc.ClientCo
 		return err
 	}
 
-	var entries []*conntrackpb.Entry
+	var (
+		entries   []*conntrackpb.Entry
+		endpoints []*conntrackpb.IndexedEndpoint
+	)
 	for {
 		resp, err := stream.Recv()
 		if errors.Is(err, io.EOF) {
@@ -80,6 +84,10 @@ func runListCTStats(ctx context.Context, cmd *cobra.Command, conn *grpc.ClientCo
 		}
 		if ns := resp.GetNodeStatus(); ns != nil {
 			fmt.Fprintf(cmd.ErrOrStderr(), "Error from node(s) %s: %s\n", strings.Join(ns.GetNodeNames(), ", "), ns.GetMessage())
+			continue
+		}
+		if ep := resp.GetEndpoint(); ep != nil {
+			endpoints = append(endpoints, ep)
 			continue
 		}
 		e := resp.GetEntry()
@@ -96,22 +104,31 @@ func runListCTStats(ctx context.Context, cmd *cobra.Command, conn *grpc.ClientCo
 
 	switch listOpts.output {
 	case "json":
-		return jsonOutput(cmd.OutOrStdout(), entries)
+		return jsonOutput(cmd.OutOrStdout(), &conntrackJSONOutput{Endpoints: endpoints, Entries: entries})
 	case "table":
-		return conntrackTableOutput(cmd.OutOrStdout(), entries)
+		return conntrackTableOutput(cmd.OutOrStdout(), entries, endpoints)
 	default:
 		return fmt.Errorf("unknown output format: %s", listOpts.output)
 	}
 }
 
-func conntrackTableOutput(buf io.Writer, entries []*conntrackpb.Entry) error {
+type conntrackJSONOutput struct {
+	Endpoints []*conntrackpb.IndexedEndpoint `json:"endpoints,omitempty"`
+	Entries   []*conntrackpb.Entry           `json:"entries"`
+}
+
+func conntrackTableOutput(buf io.Writer, entries []*conntrackpb.Entry, endpoints []*conntrackpb.IndexedEndpoint) error {
+	byIndex := make(map[uint32]*flowpb.Endpoint, len(endpoints))
+	for _, ep := range endpoints {
+		byIndex[ep.GetIndex()] = ep.GetEndpoint()
+	}
 	tw := tabwriter.NewWriter(buf, 2, 0, 3, ' ', 0)
 	fmt.Fprint(tw, "SOURCE\tDESTINATION\tPROTO\tALIVE\tRX PACKETS\tTX PACKETS\tRX BYTES\tTX BYTES")
 	fmt.Fprintln(tw)
 	for _, v := range sortedEntries(entries) {
 		fmt.Fprint(tw,
-			fmt.Sprintf("%s:%d", v.GetKey().GetSourceIp(), v.GetKey().GetSourcePort()), "\t",
-			fmt.Sprintf("%s:%d", v.GetKey().GetDestinationIp(), v.GetKey().GetDestinationPort()), "\t",
+			formatAddr(v.GetKey().GetSourceIp(), v.GetKey().GetSourcePort(), v.SourceEndpointIndex, byIndex), "\t",
+			formatAddr(v.GetKey().GetDestinationIp(), v.GetKey().GetDestinationPort(), v.DestinationEndpointIndex, byIndex), "\t",
 			conntrackProtocolName(v.GetKey().GetProtocol()), "\t",
 			v.GetState().GetAlive(), "\t",
 			v.GetValue().GetRxPackets(), "\t",
@@ -125,6 +142,36 @@ func conntrackTableOutput(buf io.Writer, entries []*conntrackpb.Entry) error {
 		return err
 	}
 	return nil
+}
+
+// formatAddr formats an address, followed by the name of its endpoint if it
+// was resolved.
+func formatAddr(ip string, port uint32, epIdx *uint32, endpoints map[uint32]*flowpb.Endpoint) string {
+	addr := fmt.Sprintf("%s:%d", ip, port)
+	if epIdx == nil {
+		return addr
+	}
+	if name := formatEndpoint(endpoints[*epIdx]); name != "" {
+		return addr + " (" + name + ")"
+	}
+	return addr
+}
+
+// formatEndpoint returns the namespace/pod name of ep if known, else its
+// reserved identity label, else its endpoint ID. It returns "" for a nil ep.
+func formatEndpoint(ep *flowpb.Endpoint) string {
+	if ns, pod := ep.GetNamespace(), ep.GetPodName(); ns != "" && pod != "" {
+		return ns + "/" + pod
+	}
+	for _, l := range ep.GetLabels() {
+		if strings.HasPrefix(l, "reserved:") {
+			return l
+		}
+	}
+	if id := ep.GetID(); id != 0 {
+		return fmt.Sprintf("ID:%d", id)
+	}
+	return ""
 }
 
 func conntrackProtocolName(protocol uint32) string {
