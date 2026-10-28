@@ -30,10 +30,12 @@ import (
 	"github.com/cilium/cilium/pkg/hubble/metrics"
 	"github.com/cilium/cilium/pkg/hubble/monitor"
 	"github.com/cilium/cilium/pkg/hubble/observer"
+	observerctstats "github.com/cilium/cilium/pkg/hubble/observer/ctstats"
 	"github.com/cilium/cilium/pkg/hubble/observer/namespace"
 	"github.com/cilium/cilium/pkg/hubble/observer/observeroption"
 	"github.com/cilium/cilium/pkg/hubble/parser"
 	"github.com/cilium/cilium/pkg/hubble/peer"
+	resolverTypes "github.com/cilium/cilium/pkg/hubble/resolver/types"
 	"github.com/cilium/cilium/pkg/hubble/server"
 	"github.com/cilium/cilium/pkg/hubble/server/serveroption"
 	identitycell "github.com/cilium/cilium/pkg/identity/cache/cell"
@@ -66,6 +68,7 @@ type hubbleIntegration struct {
 	monitorAgent      monitorAgent.Agent
 	tlsConfigPromise  tlsConfigPromise
 	ctStats           *ctstats.Cache
+	endpointGetter    resolverTypes.EndpointGetter
 	exporters         []exporter.FlowLogExporter
 
 	// dropEventEmitter emits Kubernetes events for packet drops.
@@ -95,6 +98,7 @@ func createHubbleIntegration(
 	monitorAgent monitorAgent.Agent,
 	tlsConfigPromise tlsConfigPromise,
 	ctStats *ctstats.Cache,
+	endpointGetter resolverTypes.EndpointGetter,
 	observerOptions []observeroption.Option,
 	exporterBuilders []*exportercell.FlowLogExporterBuilder,
 	dropEventEmitter dropeventemitter.FlowProcessor,
@@ -126,6 +130,7 @@ func createHubbleIntegration(
 		monitorAgent:         monitorAgent,
 		tlsConfigPromise:     tlsConfigPromise,
 		ctStats:              ctStats,
+		endpointGetter:       endpointGetter,
 		observerOptions:      observerOptions,
 		exporters:            exporters,
 		dropEventEmitter:     dropEventEmitter,
@@ -269,10 +274,15 @@ func (h *hubbleIntegration) launch(ctx context.Context) (*observer.LocalObserver
 	// for explicit ordering of known dependencies
 	observerOpts = append(observerOpts, h.observerOptions...)
 
+	var ctExporter *observerctstats.Exporter
+	if h.ctStats != nil {
+		ctExporter = observerctstats.NewExporter(h.ctStats, h.endpointGetter)
+	}
+
 	hubbleObserver, err := observer.NewLocalServer(
 		h.payloadParser,
 		h.nsManager,
-		h.ctStats,
+		ctExporter,
 		h.log,
 		observerOpts...,
 	)

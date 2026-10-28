@@ -30,6 +30,7 @@ import (
 	"github.com/cilium/cilium/pkg/ctstats"
 	hubv1 "github.com/cilium/cilium/pkg/hubble/api/v1"
 	"github.com/cilium/cilium/pkg/hubble/container"
+	observerctstats "github.com/cilium/cilium/pkg/hubble/observer/ctstats"
 	"github.com/cilium/cilium/pkg/hubble/observer/namespace"
 	"github.com/cilium/cilium/pkg/hubble/observer/observeroption"
 	observerTypes "github.com/cilium/cilium/pkg/hubble/observer/types"
@@ -794,7 +795,8 @@ func TestLocalObserverServer_GetConntrackStats(t *testing.T) {
 			yield(tuple, ctstats.Value{RxPackets: 1, TxPackets: 2, RxBytes: 3, TxBytes: 4})
 			return nil
 		}, time.Minute, 10)
-		s, err := NewLocalServer(pp, nm, cache, hivetest.Logger(t))
+		exporter := observerctstats.NewExporter(cache, &testutils.NoopEndpointGetter)
+		s, err := NewLocalServer(pp, nm, exporter, hivetest.Logger(t))
 		require.NoError(t, err)
 
 		var got []*conntrackpb.GetStatsResponse
@@ -806,8 +808,12 @@ func TestLocalObserverServer_GetConntrackStats(t *testing.T) {
 			FakeGRPCServerStream: &testutils.FakeGRPCServerStream{OnContext: t.Context},
 		})
 		require.NoError(t, err)
-		require.Len(t, got, 1)
-		e := got[0].GetEntry()
+		// The endpoint is sent once, before the entry referencing it.
+		require.Len(t, got, 2)
+		require.EqualValues(t, 0, got[0].GetEndpoint().GetIndex())
+		e := got[1].GetEntry()
+		require.EqualValues(t, 0, e.GetSourceEndpointIndex())
+		require.EqualValues(t, 0, e.GetDestinationEndpointIndex())
 		require.Equal(t, "10.0.0.1", e.GetKey().GetSourceIp())
 		require.EqualValues(t, 80, e.GetKey().GetDestinationPort())
 		require.EqualValues(t, 4, e.GetValue().GetTxBytes())

@@ -20,7 +20,6 @@ import (
 	flowpb "github.com/cilium/cilium/api/v1/flow"
 	observerpb "github.com/cilium/cilium/api/v1/observer"
 	"github.com/cilium/cilium/pkg/counter"
-	"github.com/cilium/cilium/pkg/ctstats"
 	v1 "github.com/cilium/cilium/pkg/hubble/api/v1"
 	"github.com/cilium/cilium/pkg/hubble/build"
 	"github.com/cilium/cilium/pkg/hubble/container"
@@ -71,15 +70,15 @@ type LocalObserverServer struct {
 
 	nsManager namespace.Manager
 
-	// ctStats is the cache of the datapath conntrack stats
-	ctStats *ctstats.Cache
+	// ctExporter exports the datapath conntrack stats, nil if disabled
+	ctExporter *observerctstats.Exporter
 }
 
 // NewLocalServer returns a new local observer server.
 func NewLocalServer(
 	payloadParser parser.Decoder,
 	nsManager namespace.Manager,
-	ctStats *ctstats.Cache,
+	ctExporter *observerctstats.Exporter,
 	logger *slog.Logger,
 	options ...observeroption.Option,
 ) (*LocalObserverServer, error) {
@@ -105,7 +104,7 @@ func NewLocalServer(
 		payloadParser: payloadParser,
 		startTime:     time.Now(),
 		nsManager:     nsManager,
-		ctStats:       ctStats,
+		ctExporter:    ctExporter,
 		opts:          opts,
 	}
 
@@ -269,17 +268,28 @@ func (s *LocalObserverServer) GetConntrackStats(
 	req *conntrackpb.GetStatsRequest,
 	server observerpb.Observer_GetConntrackStatsServer,
 ) error {
-	if s.ctStats == nil {
+	if s.ctExporter == nil {
 		return status.Error(codes.Unavailable, "conntrack stats are not enabled")
 	}
 
 	ctx := server.Context()
-	snap, err := s.ctStats.Snapshot(ctx)
+	snap, err := s.ctExporter.Snapshot(ctx)
 	if err != nil {
 		return status.Errorf(codes.Internal, "failed to get conntrack stats: %v", err)
 	}
 
-	for e := range observerctstats.Entries(snap) {
+	for ep := range snap.Endpoints() {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := server.Send(&conntrackpb.GetStatsResponse{
+			ResponseTypes: &conntrackpb.GetStatsResponse_Endpoint{Endpoint: ep},
+		}); err != nil {
+			return err
+		}
+	}
+
+	for e := range snap.Entries() {
 		if err := ctx.Err(); err != nil {
 			return err
 		}

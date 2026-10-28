@@ -27,6 +27,7 @@ import (
 	"github.com/cilium/cilium/pkg/hubble/peer"
 	peercell "github.com/cilium/cilium/pkg/hubble/peer/cell"
 	"github.com/cilium/cilium/pkg/hubble/resolver"
+	resolverTypes "github.com/cilium/cilium/pkg/hubble/resolver/types"
 	identitycell "github.com/cilium/cilium/pkg/identity/cache/cell"
 	"github.com/cilium/cilium/pkg/ipcache"
 	monitorAgent "github.com/cilium/cilium/pkg/monitor/agent"
@@ -94,7 +95,8 @@ type hubbleParams struct {
 
 	TLSConfigPromise tlsConfigPromise
 
-	CTStats *ctstats.Cache
+	CTStats        *ctstats.Cache
+	EndpointGetter resolverTypes.EndpointGetter
 
 	// NOTE: ordering is not guaranteed, do not rely on it.
 	ObserverOptions  []observeroption.Option                `group:"hubble-observer-options"`
@@ -128,6 +130,7 @@ func newHubbleIntegration(params hubbleParams) (HubbleIntegration, error) {
 		params.MonitorAgent,
 		params.TLSConfigPromise,
 		params.CTStats,
+		params.EndpointGetter,
 		params.ObserverOptions,
 		params.ExporterBuilders,
 		params.DropEventEmitter,
