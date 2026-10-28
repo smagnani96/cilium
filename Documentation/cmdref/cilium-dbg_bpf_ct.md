@@ -25,4 +25,5 @@ Connection tracking tables
 * [cilium-dbg bpf](cilium-dbg_bpf.md)	 - Direct access to local BPF maps
 * [cilium-dbg bpf ct flush](cilium-dbg_bpf_ct_flush.md)	 - Flush all connection tracking entries
 * [cilium-dbg bpf ct list](cilium-dbg_bpf_ct_list.md)	 - List connection tracking entries
+* [cilium-dbg bpf ct stats](cilium-dbg_bpf_ct_stats.md)	 - Connection tracking statistics only
 

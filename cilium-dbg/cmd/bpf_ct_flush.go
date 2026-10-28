@@ -52,10 +52,33 @@ func flushCt() {
 
 	maps := ctmap.Maps(ipv4, ipv6)
 
+	stats4, stats6 := ctmap.GlobalStatsMaps(ipv4, ipv6)
+	if stats4 != nil {
+		if err := stats4.Open(); err != nil {
+			stats4 = nil
+		} else {
+			defer stats4.Close()
+		}
+	}
+	if stats6 != nil {
+		if err := stats6.Open(); err != nil {
+			stats6 = nil
+		} else {
+			defer stats6.Close()
+		}
+	}
+
 	observable4, next4, complete4 := stream.Multicast[ctmap.GCEvent]()
 	observable6, next6, complete6 := stream.Multicast[ctmap.GCEvent]()
 	observable4.Observe(context.Background(), ctmap.NatMapNext4, func(error) {})
 	observable6.Observe(context.Background(), ctmap.NatMapNext6, func(error) {})
+
+	if stats4 != nil {
+		observable4.Observe(context.Background(), func(event ctmap.GCEvent) { ctmap.PruneStatsEntry(stats4, event) }, func(error) {})
+	}
+	if stats6 != nil {
+		observable6.Observe(context.Background(), func(event ctmap.GCEvent) { ctmap.PruneStatsEntry(stats6, event) }, func(error) {})
+	}
 
 	for _, m := range maps {
 		path, err := ctmap.OpenCTMap(m)
