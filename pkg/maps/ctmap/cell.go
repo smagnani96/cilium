@@ -22,6 +22,7 @@ var Cell = cell.Module(
 	"eBPF map which manages connection tracking",
 
 	cell.Provide(newCTMaps, newCTStatsMaps),
+	cell.Invoke(registerStatsCollector),
 )
 
 func newCTMaps(lifecycle cell.Lifecycle, daemonConfig *option.DaemonConfig, registry *metrics.Registry, natMap4 nat.NatMap4, natMap6 nat.NatMap6) bpf.MapOut[CTMaps] {

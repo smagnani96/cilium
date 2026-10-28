@@ -617,6 +617,9 @@ Name                                          Labels                            
 ``datapath_conntrack_gc_duration_seconds``    ``family``, ``protocol``, ``status``                Enabled    Duration in seconds of the garbage collector process
 ``datapath_conntrack_stats_gc_packets_total`` ``family``, ``protocol``, ``status``, ``direction`` Disabled   Cumulative number of packets accounted for by connection tracking entries (requires ``--bpf-ct-stats``)
 ``datapath_conntrack_stats_gc_bytes_total``   ``family``, ``protocol``, ``status``, ``direction`` Disabled   Cumulative number of bytes accounted for by connection tracking entries (requires ``--bpf-ct-stats``)
+``datapath_conntrack_stats_packets``          ``family``, ``protocol``, ``status``, ``direction`` Disabled   Current number of packets accounted for by alive connection tracking entries (requires ``--bpf-ct-stats``)
+``datapath_conntrack_stats_bytes``            ``family``, ``protocol``, ``status``, ``direction`` Disabled   Current number of bytes accounted for by alive connection tracking entries (requires ``--bpf-ct-stats``)
+``datapath_conntrack_stats_entries``          ``family``, ``protocol``, ``status``                Disabled   Current number of alive connection tracking entries (requires ``--bpf-ct-stats``)
 ``device_bytes_total``                        ``device``, ``direction``                           Enabled    Total number of bytes seen on a Cilium-managed device, tagged by ingress/egress direction
 ``device_packets_total``                      ``device``, ``direction``                           Enabled    Total number of packets seen on a Cilium-managed device, tagged by ingress/egress direction
 ============================================= =================================================== ========== ========================================================

@@ -5,14 +5,19 @@ package ctmap
 
 import (
 	"fmt"
+	"log/slog"
 	"strings"
 	"unsafe"
 
 	"github.com/cilium/cilium/pkg/bpf"
 	"github.com/cilium/cilium/pkg/datapath/linux/probes"
 	"github.com/cilium/cilium/pkg/ebpf"
+	"github.com/cilium/cilium/pkg/lock"
+	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/cilium/cilium/pkg/metrics"
+	"github.com/cilium/cilium/pkg/option"
 	ciliumebpf "github.com/cilium/ebpf"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 const (
@@ -49,6 +54,13 @@ func (v *CtStats) New() bpf.MapValue { return &CtStats{} }
 
 func (v *CtStats) String() string {
 	return fmt.Sprintf("RxPackets:%d RxBytes:%d TxPackets:%d TxBytes:%d", v.RxPackets, v.RxBytes, v.TxPackets, v.TxBytes)
+}
+
+func (v *CtStats) Add(other *CtStats) {
+	v.RxPackets += other.RxPackets
+	v.RxBytes += other.RxBytes
+	v.TxPackets += other.TxPackets
+	v.TxBytes += other.TxBytes
 }
 
 type StatsMap interface {
@@ -251,4 +263,119 @@ func PruneStatsEntry(statsMap StatsMap, event GCEvent) {
 	metrics.ConntrackStatsGCBytes.WithLabelValues(family, protocol, metricsDeleted, metricsEgress).Add(float64(value.TxBytes))
 	metrics.ConntrackStatsGCPackets.WithLabelValues(family, protocol, metricsDeleted, metricsIngress).Add(float64(value.RxPackets))
 	metrics.ConntrackStatsGCPackets.WithLabelValues(family, protocol, metricsDeleted, metricsEgress).Add(float64(value.TxPackets))
+}
+
+// statsCollector is a prometheus.Collector that scans the CT stats maps at
+// scrape time to expose the alive packet/byte/entry counts.
+type statsCollector struct {
+	logger *slog.Logger
+	maps   StatsMaps
+
+	mutex lock.Mutex
+
+	bytesDesc   *prometheus.Desc
+	packetsDesc *prometheus.Desc
+	entriesDesc *prometheus.Desc
+}
+
+func newStatsCollector(logger *slog.Logger, maps StatsMaps) *statsCollector {
+	return &statsCollector{
+		logger: logger,
+		maps:   maps,
+		bytesDesc: prometheus.NewDesc(
+			prometheus.BuildFQName(metrics.Namespace, metrics.SubsystemDatapath, "conntrack_stats_bytes"),
+			"Current number of bytes accounted for by alive connection tracking entries "+
+				"labeled by datapath family, protocol, status, and direction",
+			[]string{metrics.LabelDatapathFamily, metrics.LabelProtocol, metrics.LabelStatus, metrics.LabelDirection}, nil,
+		),
+		packetsDesc: prometheus.NewDesc(
+			prometheus.BuildFQName(metrics.Namespace, metrics.SubsystemDatapath, "conntrack_stats_packets"),
+			"Current number of packets accounted for by alive connection tracking entries "+
+				"labeled by datapath family, protocol, status, and direction",
+			[]string{metrics.LabelDatapathFamily, metrics.LabelProtocol, metrics.LabelStatus, metrics.LabelDirection}, nil,
+		),
+		entriesDesc: prometheus.NewDesc(
+			prometheus.BuildFQName(metrics.Namespace, metrics.SubsystemDatapath, "conntrack_stats_entries"),
+			"Current number of connection tracking alive entries "+
+				"labeled by datapath family, status, and protocol",
+			[]string{metrics.LabelDatapathFamily, metrics.LabelStatus, metrics.LabelProtocol}, nil,
+		),
+	}
+}
+
+func (c *statsCollector) Describe(ch chan<- *prometheus.Desc) {
+	ch <- c.bytesDesc
+	ch <- c.packetsDesc
+	ch <- c.entriesDesc
+}
+
+func (c *statsCollector) Collect(ch chan<- prometheus.Metric) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
+	for _, ipv6 := range []bool{false, true} {
+		statsMap := c.maps.StatsMapForFamily(ipv6)
+		if statsMap == nil {
+			continue
+		}
+		if err := c.collectMap(statsMap, ch); err != nil {
+			c.logger.Warn("Failed to collect CT stats metrics",
+				logfields.Error, err,
+				logfields.Name, statsMap.Name(),
+			)
+		}
+	}
+}
+
+// collectMap collects the CT stats from the given statsMap and sends them to the Prometheus channel.
+func (c *statsCollector) collectMap(statsMap StatsMap, ch chan<- prometheus.Metric) error {
+	var (
+		tcpTotal, nontcpTotal     CtStats
+		tcpEntries, nontcpEntries uint
+	)
+
+	err := statsMap.DumpWithCallback(func(k StatsKey, v *CtStats) {
+		if isKeyTCP(k) {
+			tcpTotal.Add(v)
+			tcpEntries++
+		} else {
+			nontcpTotal.Add(v)
+			nontcpEntries++
+		}
+	})
+	if err != nil {
+		return fmt.Errorf("failed to dump %s: %w", statsMap.Name(), err)
+	}
+
+	family := statsMap.Family()
+	for _, p := range []struct {
+		protocol string
+		total    CtStats
+		entries  uint
+	}{
+		{gcProtocolTCP.String(), tcpTotal, tcpEntries},
+		{gcProtocolAny.String(), nontcpTotal, nontcpEntries},
+	} {
+		ch <- prometheus.MustNewConstMetric(c.bytesDesc, prometheus.GaugeValue, float64(p.total.RxBytes), family, p.protocol, metricsAlive, metricsIngress)
+		ch <- prometheus.MustNewConstMetric(c.bytesDesc, prometheus.GaugeValue, float64(p.total.TxBytes), family, p.protocol, metricsAlive, metricsEgress)
+		ch <- prometheus.MustNewConstMetric(c.packetsDesc, prometheus.GaugeValue, float64(p.total.RxPackets), family, p.protocol, metricsAlive, metricsIngress)
+		ch <- prometheus.MustNewConstMetric(c.packetsDesc, prometheus.GaugeValue, float64(p.total.TxPackets), family, p.protocol, metricsAlive, metricsEgress)
+		ch <- prometheus.MustNewConstMetric(c.entriesDesc, prometheus.GaugeValue, float64(p.entries), family, metricsAlive, p.protocol)
+	}
+	return nil
+}
+
+func registerStatsCollector(logger *slog.Logger, daemonCfg *option.DaemonConfig, registry *metrics.Registry, maps StatsMaps) {
+	if !daemonCfg.BPFConntrackStats {
+		logger.Info("BPFConntrackStats is disabled, skipping CT stats collector registration. " +
+			"cilium_datapath_conntrack_stats metrics will not be collected")
+		return
+	}
+
+	if err := registry.Register(newStatsCollector(logger, maps)); err != nil {
+		logger.Error("Failed to register CT stats collector to Prometheus registry. "+
+			"cilium_datapath_conntrack_stats metrics will not be collected",
+			logfields.Error, err,
+		)
+	}
 }
