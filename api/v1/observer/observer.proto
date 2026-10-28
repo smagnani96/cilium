@@ -9,6 +9,7 @@ import "google/protobuf/timestamp.proto";
 import "google/protobuf/field_mask.proto";
 import public "flow/flow.proto";
 import "relay/relay.proto";
+import "conntrack/conntrack.proto";
 
 package observer;
 
@@ -37,6 +38,10 @@ service Observer {
 
     // ServerStatus returns some details about the running hubble server.
     rpc ServerStatus(ServerStatusRequest) returns (ServerStatusResponse) {}
+
+    // GetConntrackStats returns the connection tracking stats currently
+    // present in the node's datapath conntrack maps.
+    rpc GetConntrackStats(conntrack.GetStatsRequest) returns (stream conntrack.GetStatsResponse) {}
 }
 
 message ServerStatusRequest {}

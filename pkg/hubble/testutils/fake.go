@@ -14,6 +14,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/connectivity"
 
+	conntrackpb "github.com/cilium/cilium/api/v1/conntrack"
 	flowpb "github.com/cilium/cilium/api/v1/flow"
 	"github.com/cilium/cilium/api/v1/models"
 	observerpb "github.com/cilium/cilium/api/v1/observer"
@@ -63,15 +64,31 @@ func (s *FakeGetAgentEventsServer) Send(response *observerpb.GetAgentEventsRespo
 	panic("OnSend not set")
 }
 
+// FakeGetConntrackStatsServer is used for unit tests and implements the
+// observerpb.Observer_GetConntrackStatsServer interface.
+type FakeGetConntrackStatsServer struct {
+	OnSend func(response *conntrackpb.GetStatsResponse) error
+	*FakeGRPCServerStream
+}
+
+// Send implements observerpb.Observer_GetConntrackStatsServer.Send.
+func (s *FakeGetConntrackStatsServer) Send(response *conntrackpb.GetStatsResponse) error {
+	if s.OnSend != nil {
+		return s.OnSend(response)
+	}
+	panic("OnSend not set")
+}
+
 // FakeObserverClient is used for unit tests and implements the
 // observerpb.ObserverClient interface.
 type FakeObserverClient struct {
-	OnGetFlows       func(ctx context.Context, in *observerpb.GetFlowsRequest, opts ...grpc.CallOption) (observerpb.Observer_GetFlowsClient, error)
-	OnGetAgentEvents func(ctx context.Context, in *observerpb.GetAgentEventsRequest, opts ...grpc.CallOption) (observerpb.Observer_GetAgentEventsClient, error)
-	OnGetDebugEvents func(ctx context.Context, in *observerpb.GetDebugEventsRequest, opts ...grpc.CallOption) (observerpb.Observer_GetDebugEventsClient, error)
-	OnGetNodes       func(ctx context.Context, in *observerpb.GetNodesRequest, opts ...grpc.CallOption) (*observerpb.GetNodesResponse, error)
-	OnGetNamespaces  func(ctx context.Context, in *observerpb.GetNamespacesRequest, opts ...grpc.CallOption) (*observerpb.GetNamespacesResponse, error)
-	OnServerStatus   func(ctx context.Context, in *observerpb.ServerStatusRequest, opts ...grpc.CallOption) (*observerpb.ServerStatusResponse, error)
+	OnGetConntrackStats func(ctx context.Context, in *conntrackpb.GetStatsRequest, opts ...grpc.CallOption) (observerpb.Observer_GetConntrackStatsClient, error)
+	OnGetFlows          func(ctx context.Context, in *observerpb.GetFlowsRequest, opts ...grpc.CallOption) (observerpb.Observer_GetFlowsClient, error)
+	OnGetAgentEvents    func(ctx context.Context, in *observerpb.GetAgentEventsRequest, opts ...grpc.CallOption) (observerpb.Observer_GetAgentEventsClient, error)
+	OnGetDebugEvents    func(ctx context.Context, in *observerpb.GetDebugEventsRequest, opts ...grpc.CallOption) (observerpb.Observer_GetDebugEventsClient, error)
+	OnGetNodes          func(ctx context.Context, in *observerpb.GetNodesRequest, opts ...grpc.CallOption) (*observerpb.GetNodesResponse, error)
+	OnGetNamespaces     func(ctx context.Context, in *observerpb.GetNamespacesRequest, opts ...grpc.CallOption) (*observerpb.GetNamespacesResponse, error)
+	OnServerStatus      func(ctx context.Context, in *observerpb.ServerStatusRequest, opts ...grpc.CallOption) (*observerpb.ServerStatusResponse, error)
 }
 
 // GetFlows implements observerpb.ObserverClient.GetFlows.
@@ -120,6 +137,29 @@ func (c *FakeObserverClient) ServerStatus(ctx context.Context, in *observerpb.Se
 		return c.OnServerStatus(ctx, in, opts...)
 	}
 	panic("OnServerStatus not set")
+}
+
+// GetConntrackStats implements observerpb.ObserverClient.GetConntrackStats.
+func (c *FakeObserverClient) GetConntrackStats(ctx context.Context, in *conntrackpb.GetStatsRequest, opts ...grpc.CallOption) (observerpb.Observer_GetConntrackStatsClient, error) {
+	if c.OnGetConntrackStats != nil {
+		return c.OnGetConntrackStats(ctx, in, opts...)
+	}
+	panic("OnGetConntrackStats not set")
+}
+
+// FakeGetConntrackStatsClient is used for unit tests and implements the
+// observerpb.Observer_GetConntrackStatsClient interface.
+type FakeGetConntrackStatsClient struct {
+	OnRecv func() (*conntrackpb.GetStatsResponse, error)
+	*FakeGRPCClientStream
+}
+
+// Recv implements observerpb.Observer_GetConntrackStatsClient.Recv.
+func (c *FakeGetConntrackStatsClient) Recv() (*conntrackpb.GetStatsResponse, error) {
+	if c.OnRecv != nil {
+		return c.OnRecv()
+	}
+	panic("OnRecv not set")
 }
 
 // FakeGetFlowsClient is used for unit tests and implements the

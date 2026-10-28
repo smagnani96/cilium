@@ -11,6 +11,7 @@ package observer
 
 import (
 	context "context"
+	conntrack "github.com/cilium/cilium/api/v1/conntrack"
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"
@@ -22,12 +23,13 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Observer_GetFlows_FullMethodName       = "/observer.Observer/GetFlows"
-	Observer_GetAgentEvents_FullMethodName = "/observer.Observer/GetAgentEvents"
-	Observer_GetDebugEvents_FullMethodName = "/observer.Observer/GetDebugEvents"
-	Observer_GetNodes_FullMethodName       = "/observer.Observer/GetNodes"
-	Observer_GetNamespaces_FullMethodName  = "/observer.Observer/GetNamespaces"
-	Observer_ServerStatus_FullMethodName   = "/observer.Observer/ServerStatus"
+	Observer_GetFlows_FullMethodName          = "/observer.Observer/GetFlows"
+	Observer_GetAgentEvents_FullMethodName    = "/observer.Observer/GetAgentEvents"
+	Observer_GetDebugEvents_FullMethodName    = "/observer.Observer/GetDebugEvents"
+	Observer_GetNodes_FullMethodName          = "/observer.Observer/GetNodes"
+	Observer_GetNamespaces_FullMethodName     = "/observer.Observer/GetNamespaces"
+	Observer_ServerStatus_FullMethodName      = "/observer.Observer/ServerStatus"
+	Observer_GetConntrackStats_FullMethodName = "/observer.Observer/GetConntrackStats"
 )
 
 // ObserverClient is the client API for Observer service.
@@ -52,6 +54,9 @@ type ObserverClient interface {
 	GetNamespaces(ctx context.Context, in *GetNamespacesRequest, opts ...grpc.CallOption) (*GetNamespacesResponse, error)
 	// ServerStatus returns some details about the running hubble server.
 	ServerStatus(ctx context.Context, in *ServerStatusRequest, opts ...grpc.CallOption) (*ServerStatusResponse, error)
+	// GetConntrackStats returns the connection tracking stats currently
+	// present in the node's datapath conntrack maps.
+	GetConntrackStats(ctx context.Context, in *conntrack.GetStatsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[conntrack.GetStatsResponse], error)
 }
 
 type observerClient struct {
@@ -149,6 +154,25 @@ func (c *observerClient) ServerStatus(ctx context.Context, in *ServerStatusReque
 	return out, nil
 }
 
+func (c *observerClient) GetConntrackStats(ctx context.Context, in *conntrack.GetStatsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[conntrack.GetStatsResponse], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &Observer_ServiceDesc.Streams[3], Observer_GetConntrackStats_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[conntrack.GetStatsRequest, conntrack.GetStatsResponse]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Observer_GetConntrackStatsClient = grpc.ServerStreamingClient[conntrack.GetStatsResponse]
+
 // ObserverServer is the server API for Observer service.
 // All implementations should embed UnimplementedObserverServer
 // for forward compatibility.
@@ -171,6 +195,9 @@ type ObserverServer interface {
 	GetNamespaces(context.Context, *GetNamespacesRequest) (*GetNamespacesResponse, error)
 	// ServerStatus returns some details about the running hubble server.
 	ServerStatus(context.Context, *ServerStatusRequest) (*ServerStatusResponse, error)
+	// GetConntrackStats returns the connection tracking stats currently
+	// present in the node's datapath conntrack maps.
+	GetConntrackStats(*conntrack.GetStatsRequest, grpc.ServerStreamingServer[conntrack.GetStatsResponse]) error
 }
 
 // UnimplementedObserverServer should be embedded to have
@@ -197,6 +224,9 @@ func (UnimplementedObserverServer) GetNamespaces(context.Context, *GetNamespaces
 }
 func (UnimplementedObserverServer) ServerStatus(context.Context, *ServerStatusRequest) (*ServerStatusResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ServerStatus not implemented")
+}
+func (UnimplementedObserverServer) GetConntrackStats(*conntrack.GetStatsRequest, grpc.ServerStreamingServer[conntrack.GetStatsResponse]) error {
+	return status.Error(codes.Unimplemented, "method GetConntrackStats not implemented")
 }
 func (UnimplementedObserverServer) testEmbeddedByValue() {}
 
@@ -305,6 +335,17 @@ func _Observer_ServerStatus_Handler(srv interface{}, ctx context.Context, dec fu
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Observer_GetConntrackStats_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(conntrack.GetStatsRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(ObserverServer).GetConntrackStats(m, &grpc.GenericServerStream[conntrack.GetStatsRequest, conntrack.GetStatsResponse]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Observer_GetConntrackStatsServer = grpc.ServerStreamingServer[conntrack.GetStatsResponse]
+
 // Observer_ServiceDesc is the grpc.ServiceDesc for Observer service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -339,6 +380,11 @@ var Observer_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "GetDebugEvents",
 			Handler:       _Observer_GetDebugEvents_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "GetConntrackStats",
+			Handler:       _Observer_GetConntrackStats_Handler,
 			ServerStreams: true,
 		},
 	},

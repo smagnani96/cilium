@@ -16,6 +16,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	conntrackpb "github.com/cilium/cilium/api/v1/conntrack"
 	flowpb "github.com/cilium/cilium/api/v1/flow"
 	observerpb "github.com/cilium/cilium/api/v1/observer"
 	"github.com/cilium/cilium/pkg/counter"
@@ -254,6 +255,14 @@ func (s *LocalObserverServer) GetNodes(ctx context.Context, req *observerpb.GetN
 // GetNamespaces implements observerpb.ObserverClient.GetNamespaces.
 func (s *LocalObserverServer) GetNamespaces(ctx context.Context, req *observerpb.GetNamespacesRequest) (*observerpb.GetNamespacesResponse, error) {
 	return &observerpb.GetNamespacesResponse{Namespaces: s.nsManager.GetNamespaces()}, nil
+}
+
+// GetConntrackStats implements observerpb.ObserverServer.GetConntrackStats.
+func (s *LocalObserverServer) GetConntrackStats(
+	req *conntrackpb.GetStatsRequest,
+	server observerpb.Observer_GetConntrackStatsServer,
+) error {
+	return status.Error(codes.Unimplemented, "GetConntrackStats not implemented")
 }
 
 // GetFlows implements the proto method for client requests.

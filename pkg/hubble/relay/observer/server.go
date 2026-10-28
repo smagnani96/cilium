@@ -13,6 +13,7 @@ import (
 	grpcStatus "google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 
+	conntrackpb "github.com/cilium/cilium/api/v1/conntrack"
 	observerpb "github.com/cilium/cilium/api/v1/observer"
 	relaypb "github.com/cilium/cilium/api/v1/relay"
 	"github.com/cilium/cilium/pkg/hubble/build"
@@ -240,6 +241,11 @@ func (s *Server) GetNamespaces(ctx context.Context, req *observerpb.GetNamespace
 	}
 
 	return &observerpb.GetNamespacesResponse{Namespaces: nsManager.GetNamespaces()}, nil
+}
+
+// GetConntrackStats implements observerpb.ObserverServer.GetConntrackStats.
+func (s *Server) GetConntrackStats(req *conntrackpb.GetStatsRequest, stream observerpb.Observer_GetConntrackStatsServer) error {
+	return grpcStatus.Error(codes.Unimplemented, "GetConntrackStats not implemented")
 }
 
 // ServerStatus implements observerpb.ObserverServer.ServerStatus by aggregating

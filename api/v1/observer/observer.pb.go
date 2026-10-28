@@ -10,6 +10,7 @@
 package observer
 
 import (
+	conntrack "github.com/cilium/cilium/api/v1/conntrack"
 	flow "github.com/cilium/cilium/api/v1/flow"
 	relay "github.com/cilium/cilium/api/v1/relay"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
@@ -1748,7 +1749,7 @@ var File_observer_observer_proto protoreflect.FileDescriptor
 
 const file_observer_observer_proto_rawDesc = "" +
 	"\n" +
-	"\x17observer/observer.proto\x12\bobserver\x1a\x19google/protobuf/any.proto\x1a\x1egoogle/protobuf/wrappers.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a google/protobuf/field_mask.proto\x1a\x0fflow/flow.proto\x1a\x11relay/relay.proto\"\x15\n" +
+	"\x17observer/observer.proto\x12\bobserver\x1a\x19google/protobuf/any.proto\x1a\x1egoogle/protobuf/wrappers.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a google/protobuf/field_mask.proto\x1a\x0fflow/flow.proto\x1a\x11relay/relay.proto\x1a\x19conntrack/conntrack.proto\"\x15\n" +
 	"\x13ServerStatusRequest\"\x92\x03\n" +
 	"\x14ServerStatusResponse\x12\x1b\n" +
 	"\tnum_flows\x18\x01 \x01(\x04R\bnumFlows\x12\x1b\n" +
@@ -1849,14 +1850,15 @@ const file_observer_observer_proto_rawDesc = "" +
 	"debugEvent\x12\x1c\n" +
 	"\tnode_name\x18\xe8\a \x01(\tR\bnodeName\x12/\n" +
 	"\x04time\x18\xe9\a \x01(\v2\x1a.google.protobuf.TimestampR\x04timeB\x10\n" +
-	"\x0eresponse_types2\xed\x03\n" +
+	"\x0eresponse_types2\xbf\x04\n" +
 	"\bObserver\x12E\n" +
 	"\bGetFlows\x12\x19.observer.GetFlowsRequest\x1a\x1a.observer.GetFlowsResponse\"\x000\x01\x12W\n" +
 	"\x0eGetAgentEvents\x12\x1f.observer.GetAgentEventsRequest\x1a .observer.GetAgentEventsResponse\"\x000\x01\x12W\n" +
 	"\x0eGetDebugEvents\x12\x1f.observer.GetDebugEventsRequest\x1a .observer.GetDebugEventsResponse\"\x000\x01\x12C\n" +
 	"\bGetNodes\x12\x19.observer.GetNodesRequest\x1a\x1a.observer.GetNodesResponse\"\x00\x12R\n" +
 	"\rGetNamespaces\x12\x1e.observer.GetNamespacesRequest\x1a\x1f.observer.GetNamespacesResponse\"\x00\x12O\n" +
-	"\fServerStatus\x12\x1d.observer.ServerStatusRequest\x1a\x1e.observer.ServerStatusResponse\"\x00B*Z(github.com/cilium/cilium/api/v1/observerP\x04b\x06proto3"
+	"\fServerStatus\x12\x1d.observer.ServerStatusRequest\x1a\x1e.observer.ServerStatusResponse\"\x00\x12P\n" +
+	"\x11GetConntrackStats\x12\x1a.conntrack.GetStatsRequest\x1a\x1b.conntrack.GetStatsResponse\"\x000\x01B*Z(github.com/cilium/cilium/api/v1/observerP\x04b\x06proto3"
 
 var (
 	file_observer_observer_proto_rawDescOnce sync.Once
@@ -1900,6 +1902,8 @@ var file_observer_observer_proto_goTypes = []any{
 	(*flow.AgentEvent)(nil),              // 25: flow.AgentEvent
 	(*flow.DebugEvent)(nil),              // 26: flow.DebugEvent
 	(relay.NodeState)(0),                 // 27: relay.NodeState
+	(*conntrack.GetStatsRequest)(nil),    // 28: conntrack.GetStatsRequest
+	(*conntrack.GetStatsResponse)(nil),   // 29: conntrack.GetStatsResponse
 }
 var file_observer_observer_proto_depIdxs = []int32{
 	17, // 0: observer.ServerStatusResponse.num_connected_nodes:type_name -> google.protobuf.UInt32Value
@@ -1939,14 +1943,16 @@ var file_observer_observer_proto_depIdxs = []int32{
 	8,  // 34: observer.Observer.GetNodes:input_type -> observer.GetNodesRequest
 	12, // 35: observer.Observer.GetNamespaces:input_type -> observer.GetNamespacesRequest
 	0,  // 36: observer.Observer.ServerStatus:input_type -> observer.ServerStatusRequest
-	3,  // 37: observer.Observer.GetFlows:output_type -> observer.GetFlowsResponse
-	5,  // 38: observer.Observer.GetAgentEvents:output_type -> observer.GetAgentEventsResponse
-	7,  // 39: observer.Observer.GetDebugEvents:output_type -> observer.GetDebugEventsResponse
-	9,  // 40: observer.Observer.GetNodes:output_type -> observer.GetNodesResponse
-	13, // 41: observer.Observer.GetNamespaces:output_type -> observer.GetNamespacesResponse
-	1,  // 42: observer.Observer.ServerStatus:output_type -> observer.ServerStatusResponse
-	37, // [37:43] is the sub-list for method output_type
-	31, // [31:37] is the sub-list for method input_type
+	28, // 37: observer.Observer.GetConntrackStats:input_type -> conntrack.GetStatsRequest
+	3,  // 38: observer.Observer.GetFlows:output_type -> observer.GetFlowsResponse
+	5,  // 39: observer.Observer.GetAgentEvents:output_type -> observer.GetAgentEventsResponse
+	7,  // 40: observer.Observer.GetDebugEvents:output_type -> observer.GetDebugEventsResponse
+	9,  // 41: observer.Observer.GetNodes:output_type -> observer.GetNodesResponse
+	13, // 42: observer.Observer.GetNamespaces:output_type -> observer.GetNamespacesResponse
+	1,  // 43: observer.Observer.ServerStatus:output_type -> observer.ServerStatusResponse
+	29, // 44: observer.Observer.GetConntrackStats:output_type -> conntrack.GetStatsResponse
+	38, // [38:45] is the sub-list for method output_type
+	31, // [31:38] is the sub-list for method input_type
 	31, // [31:31] is the sub-list for extension type_name
 	31, // [31:31] is the sub-list for extension extendee
 	0,  // [0:31] is the sub-list for field type_name

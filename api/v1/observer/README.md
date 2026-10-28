@@ -341,6 +341,7 @@ to observe.
 | GetNodes | [GetNodesRequest](#observer-GetNodesRequest) | [GetNodesResponse](#observer-GetNodesResponse) | GetNodes returns information about nodes in a cluster. |
 | GetNamespaces | [GetNamespacesRequest](#observer-GetNamespacesRequest) | [GetNamespacesResponse](#observer-GetNamespacesResponse) | GetNamespaces returns information about namespaces in a cluster. The namespaces returned are namespaces which have had network flows in the last hour. The namespaces are returned sorted by cluster name and namespace in ascending order. |
 | ServerStatus | [ServerStatusRequest](#observer-ServerStatusRequest) | [ServerStatusResponse](#observer-ServerStatusResponse) | ServerStatus returns some details about the running hubble server. |
+| GetConntrackStats | [.conntrack.GetStatsRequest](#conntrack-GetStatsRequest) | [.conntrack.GetStatsResponse](#conntrack-GetStatsResponse) stream | GetConntrackStats returns the connection tracking stats currently present in the node&#39;s datapath conntrack maps. |
 
  
 

@@ -16,6 +16,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
 
+	conntrackpb "github.com/cilium/cilium/api/v1/conntrack"
 	observerpb "github.com/cilium/cilium/api/v1/observer"
 	"github.com/cilium/cilium/hubble/pkg/logger"
 	"github.com/cilium/cilium/pkg/container"
@@ -68,6 +69,11 @@ func (o *IOReaderObserver) ServerStatus(_ context.Context, _ *observerpb.ServerS
 // GetNamespaces is not implemented, and will throw an error if used.
 func (o *IOReaderObserver) GetNamespaces(_ context.Context, _ *observerpb.GetNamespacesRequest, _ ...grpc.CallOption) (*observerpb.GetNamespacesResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "GetNamespaces not implemented")
+}
+
+// GetConntrackStats is not implemented, and will throw an error if used.
+func (o *IOReaderObserver) GetConntrackStats(_ context.Context, _ *conntrackpb.GetStatsRequest, _ ...grpc.CallOption) (observerpb.Observer_GetConntrackStatsClient, error) {
+	return nil, status.Errorf(codes.Unimplemented, "GetConntrackStats not implemented")
 }
 
 // ioReaderClient implements Observer_GetFlowsClient.
