@@ -33,6 +33,7 @@ ASSIGN_CONFIG(union v6addr, nat_ipv6_masquerade, { .addr = v6_node_one_addr})
 ASSIGN_CONFIG(bool, enable_masquerade_ipv6, true)
 
 ASSIGN_CONFIG(bool, enable_conntrack_accounting, true)
+ASSIGN_CONFIG(bool, enable_conntrack_stats, true)
 ASSIGN_CONFIG(bool, enable_masquerade_ipv4, true)
 
 #include "lib/endpoint.h"
@@ -110,6 +111,13 @@ int host_bpf_masq_v4_1_udp_check(const struct __ctx_buff *ctx)
 
 	assert(ct_entry->packets == 1);
 
+	struct ct_stats *stats = map_lookup_elem(get_ct_stats_map4(), &tuple);
+
+	if (!stats)
+		test_fatal("no CT stats entry found");
+
+	assert(stats->tx_packets == 1);
+
 	test_finish();
 }
 
@@ -184,6 +192,13 @@ int host_bpf_masq_v6_1_udp_check(const struct __ctx_buff *ctx)
 		test_fatal("no CT entry found");
 
 	assert(ct_entry->packets == 1);
+
+	struct ct_stats *stats = map_lookup_elem(get_ct_stats_map6(), &tuple);
+
+	if (!stats)
+		test_fatal("no CT stats entry found");
+
+	assert(stats->tx_packets == 1);
 
 	test_finish();
 }
@@ -463,6 +478,13 @@ int host_bpf_masq_v4_4_icmp_echo_check(const struct __ctx_buff *ctx)
 
 	assert(ct_entry->packets == 1);
 
+	struct ct_stats *stats = map_lookup_elem(get_ct_stats_map4(), &tuple);
+
+	if (!stats)
+		test_fatal("no CT stats entry found");
+
+	assert(stats->tx_packets == 1);
+
 	test_finish();
 }
 
@@ -532,6 +554,13 @@ int host_bpf_masq_v6_4_icmp_echo_check(const struct __ctx_buff *ctx)
 		test_fatal("no CT entry found");
 
 	assert(ct_entry->packets == 1);
+
+	struct ct_stats *stats = map_lookup_elem(get_ct_stats_map6(), &tuple);
+
+	if (!stats)
+		test_fatal("no CT stats entry found");
+
+	assert(stats->tx_packets == 1);
 
 	test_finish();
 }

@@ -45,6 +45,15 @@ type CTEntry struct {
 	LastRxReport uint32
 }
 
+// CTStats is generated from the BPF C type ct_stats.
+type CTStats struct {
+	_         structs.HostLayout
+	RxPackets uint64
+	RxBytes   uint64
+	TxPackets uint64
+	TxBytes   uint64
+}
+
 // CTTimeoutConfig is generated from the BPF C type ct_timeout_config.
 type CTTimeoutConfig struct {
 	_                        structs.HostLayout

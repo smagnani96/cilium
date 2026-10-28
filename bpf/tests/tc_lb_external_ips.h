@@ -51,6 +51,7 @@ ASSIGN_CONFIG(struct socket_lb_config, socket_lb, { .hostns_only = true })
 
 /* For checking statistics in conntrack map. */
 ASSIGN_CONFIG(bool, enable_conntrack_accounting, true)
+ASSIGN_CONFIG(bool, enable_conntrack_stats, true)
 
 /* Expected CT tuple to check for conntrack */
 #define EXPECTED_CT_TUPLE {\
@@ -170,6 +171,14 @@ int lb4_external_ips_check(__maybe_unused const struct __ctx_buff *ctx)
 	assert(ct_entry);
 	assert(ct_entry->packets == 1);
 	assert(ct_entry->bytes == sizeof(lb4_ns_external_ip_post_dnat));
+
+	struct ct_stats *stats = map_lookup_elem(get_ct_stats_map4(), &tuple);
+
+	if (!stats)
+		test_fatal("no CT stats entry found");
+
+	assert(stats->tx_packets == 1);
+	assert(stats->tx_bytes == sizeof(lb4_ns_external_ip_post_dnat));
 #else
 	/* Ensure packet is dropped. */
 	assert(*status_code == CTX_ACT_DROP);
@@ -265,6 +274,14 @@ int lb6_external_ips_check(__maybe_unused const struct __ctx_buff *ctx)
 	assert(ct_entry);
 	assert(ct_entry->packets == 1);
 	assert(ct_entry->bytes == sizeof(lb6_ns_external_ip_post_dnat));
+
+	struct ct_stats *stats = map_lookup_elem(get_ct_stats_map6(), &tuple);
+
+	if (!stats)
+		test_fatal("no CT stats entry found");
+
+	assert(stats->tx_packets == 1);
+	assert(stats->tx_bytes == sizeof(lb6_ns_external_ip_post_dnat));
 #else
 	/* Ensure packet is dropped. */
 	assert(*status_code == CTX_ACT_DROP);

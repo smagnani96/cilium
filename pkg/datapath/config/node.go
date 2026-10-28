@@ -162,6 +162,7 @@ func NodeConfig(lnc *Config) Node {
 	node.KernelHz = uint32(option.Config.KernelHz)
 
 	node.EnableConntrackAccounting = lnc.EnableConntrackAccounting
+	node.EnableConntrackStats = lnc.EnableConntrackStats
 
 	node.EnableTraceNotify = option.Config.Opts.IsEnabled(option.TraceNotify)
 	node.Debug = option.Config.Opts.IsEnabled(option.Debug)

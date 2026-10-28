@@ -36,6 +36,7 @@
 
 /* For checking statistics in conntrack map. */
 ASSIGN_CONFIG(bool, enable_conntrack_accounting, true)
+ASSIGN_CONFIG(bool, enable_conntrack_stats, true)
 
 /* To enable drop notifications */
 ASSIGN_CONFIG(bool, enable_drop_notify, true)
@@ -187,6 +188,14 @@ int lb4_routable_clusterip_check(__maybe_unused const struct __ctx_buff *ctx)
 	assert(ct_entry->packets == 1);
 	assert(ct_entry->bytes == ctx_full_len(ctx) - sizeof(__u32));
 
+	struct ct_stats *stats = map_lookup_elem(get_ct_stats_map4(), &tuple);
+
+	if (!stats)
+		test_fatal("no CT stats entry found");
+
+	assert(stats->tx_packets == 1);
+	assert(stats->tx_bytes == ctx_full_len(ctx) - sizeof(__u32));
+
 	ASSERT_CTX_BUF_OFF("lb4_routable_clusterip", "Ether", ctx, sizeof(__u32),
 			   lb4_clusterip_post_dnat, sizeof(lb4_clusterip_post_dnat));
 
@@ -319,6 +328,14 @@ int lb6_routable_clusterip_check(__maybe_unused const struct __ctx_buff *ctx)
 	assert(ct_entry);
 	assert(ct_entry->packets == 1);
 	assert(ct_entry->bytes == ctx_full_len(ctx) - sizeof(__u32));
+
+	struct ct_stats *stats = map_lookup_elem(get_ct_stats_map4(), &tuple);
+
+	if (!stats)
+		test_fatal("no CT stats entry found");
+
+	assert(stats->tx_packets == 1);
+	assert(stats->tx_bytes == ctx_full_len(ctx) - sizeof(__u32));
 
 	ASSERT_CTX_BUF_OFF("lb6_routable_clusterip", "Ether", ctx, sizeof(__u32),
 			   lb6_clusterip_post_dnat, sizeof(lb6_clusterip_post_dnat));

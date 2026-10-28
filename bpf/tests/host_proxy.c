@@ -26,6 +26,7 @@ static volatile const __u8 *server_mac = mac_two;
 #include "lib/bpf_host.h"
 
 ASSIGN_CONFIG(bool, enable_conntrack_accounting, true)
+ASSIGN_CONFIG(bool, enable_conntrack_stats, true)
 
 #include "lib/endpoint.h"
 #include "lib/ipcache.h"
@@ -111,6 +112,13 @@ check_redirect(struct __ctx_buff *ctx, bool to_pod)
 	assert(ct_entry->packets == 1);
 	assert(ct_entry->proxy_redirect);
 
+	struct ct_stats *stats = map_lookup_elem(get_ct_stats_map4(), &tuple);
+
+	if (!stats)
+		test_fatal("no CT stats entry found");
+
+	assert(stats->tx_packets == 1);
+
 	test_finish();
 }
 
@@ -171,6 +179,13 @@ check_passthrough(const struct __ctx_buff *ctx, bool to_pod)
 	assert(ct_entry->packets == 1);
 	assert(!ct_entry->proxy_redirect);
 
+	struct ct_stats *stats = map_lookup_elem(get_ct_stats_map4(), &tuple);
+
+	if (!stats)
+		test_fatal("no CT stats entry found");
+
+	assert(stats->tx_packets == 1);
+
 	/* Check that the original CT entry was not hit */
 	tuple.sport = NODE_PORT;
 	ct_entry = map_lookup_elem(get_ct_map4(&tuple), &tuple);
@@ -179,6 +194,13 @@ check_passthrough(const struct __ctx_buff *ctx, bool to_pod)
 		test_fatal("no CT entry found");
 
 	assert(ct_entry->packets == 1);
+
+	stats = map_lookup_elem(get_ct_stats_map4(), &tuple);
+
+	if (!stats)
+		test_fatal("no CT stats entry found");
+
+	assert(stats->tx_packets == 1);
 
 	test_finish();
 }

@@ -61,6 +61,7 @@ ASSIGN_CONFIG(union v4addr, endpoint_ipv4, { .be32 = CLIENT_IP})
 
 ASSIGN_CONFIG(__u32, security_label, 0x10042)
 ASSIGN_CONFIG(bool, enable_conntrack_accounting, true)
+ASSIGN_CONFIG(bool, enable_conntrack_stats, true)
 
 #include "lib/ipcache.h"
 #include "lib/lb.h"
@@ -334,6 +335,14 @@ int overlay_to_lxc_synack_check(struct __ctx_buff *ctx)
 	if (entry->packets != 2)
 		test_fatal("rx packet didn't hit ingress conntrack entry");
 
+	struct ct_stats *stats = map_lookup_elem(get_ct_stats_map4(), &tuple);
+
+	if (!stats)
+		test_fatal("no CT stats entry found");
+
+	assert(stats->tx_packets == 1);
+	assert(stats->rx_packets == 1);
+
 	test_finish();
 }
 
@@ -423,6 +432,14 @@ int lxc_to_overlay_ack_check(struct __ctx_buff *ctx)
 
 	if (entry->packets != 3)
 		test_fatal("tx packet didn't hit egress conntrack entry");
+
+	struct ct_stats *stats = map_lookup_elem(get_ct_stats_map4(), &tuple);
+
+	if (!stats)
+		test_fatal("no CT stats entry found");
+
+	assert(stats->tx_packets == 2);
+	assert(stats->rx_packets == 1);
 
 	test_finish();
 }

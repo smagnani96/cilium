@@ -49,6 +49,8 @@ struct egressgw_test_ctx {
 	bool redirect;
 	bool tuple_collision;
 	__u64 packets;
+	__u64 rx_packets;
+	__u64 tx_packets;
 	__u32 status_code;
 };
 
@@ -214,6 +216,12 @@ static __always_inline int egressgw_snat_check(const struct __ctx_buff *ctx,
 		if (ct_entry->packets != test_ctx.packets)
 			test_fatal("bad packet count (expected %u, actual %u)",
 				   test_ctx.packets, ct_entry->packets)
+
+		__u64 rx_packets = test_ctx.rx_packets;
+		__u64 tx_packets = test_ctx.tx_packets;
+
+		assert_metrics_tx_packets(get_ct_stats_map4(), tuple, tx_packets);
+		assert_metrics_rx_packets(get_ct_stats_map4(), tuple, rx_packets);
 
 		tuple.saddr = CLIENT_IP;
 		tuple.daddr = EXTERNAL_SVC_IP;
@@ -443,6 +451,16 @@ static __always_inline int egressgw_snat_check_v6(const struct __ctx_buff *ctx,
 		if (ct_entry->packets != test_ctx.packets)
 			test_fatal("bad packet count (expected %u, actual %u)",
 				   test_ctx.packets, ct_entry->packets);
+
+		struct ct_stats *stats = map_lookup_elem(get_ct_stats_map6(), &tuple);
+		if (!stats)
+			test_fatal("no CT stats entry found");
+		if (stats->tx_packets != test_ctx.tx_packets)
+			test_fatal("bad tx packet count (expected %u, actual %u)",
+				   test_ctx.tx_packets, stats->tx_packets);
+		if (stats->rx_packets != test_ctx.rx_packets)
+			test_fatal("bad rx packet count (expected %u, actual %u)",
+				   test_ctx.rx_packets, stats->rx_packets);
 
 		tuple.saddr = client_ip;
 		tuple.daddr = ext_svc_ip;

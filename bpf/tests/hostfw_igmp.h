@@ -30,6 +30,7 @@ static volatile const __u8 *dst_mac2 = mac_four;
 ASSIGN_CONFIG(bool, enable_extended_ip_protocols, true);
 #endif
 ASSIGN_CONFIG(bool, enable_conntrack_accounting, true)
+ASSIGN_CONFIG(bool, enable_conntrack_stats, true);
 
 /* Send an IGMP packet from host to IGMP destination (allow all egress policy).
  *
@@ -106,6 +107,13 @@ int hostfw_igmp_egress_check(const struct __ctx_buff *ctx)
 		test_fatal("no CT entry found");
 
 	assert(ct_entry->packets == 1);
+
+	struct ct_stats *stats = map_lookup_elem(get_ct_stats_map4(), &tuple);
+
+	if (!stats)
+		test_fatal("no CT stats entry found");
+
+	assert(stats->tx_packets == 1);
 #else
 	if (ct_entry)
 		test_fatal("CT entry found");
@@ -192,6 +200,14 @@ int hostfw_igmp_ingress_check(const struct __ctx_buff *ctx)
 		test_fatal("no CT entry found");
 
 	assert(ct_entry->packets == 2);
+
+	struct ct_stats *stats = map_lookup_elem(get_ct_stats_map4(), &tuple);
+
+	if (!stats)
+		test_fatal("no CT stats entry found");
+
+	assert(stats->tx_packets == 1);
+	assert(stats->rx_packets == 1);
 #else
 	if (ct_entry)
 		test_fatal("CT entry found");

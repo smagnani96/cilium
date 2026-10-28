@@ -29,6 +29,7 @@ ASSIGN_CONFIG(struct socket_lb_config, socket_lb, { .hostns_only = true })
 #endif
 
 ASSIGN_CONFIG(bool, enable_conntrack_accounting, true)
+ASSIGN_CONFIG(bool, enable_conntrack_stats, true)
 ASSIGN_CONFIG(bool, enable_ipv4_fragments, true)
 ASSIGN_CONFIG(bool, enable_ipv6_fragments, true)
 
@@ -259,6 +260,14 @@ int nodeport_lb4_fragments_1_check(struct __ctx_buff *ctx)
 	assert(ct_entry->packets == count);
 	assert(ct_entry->bytes == bytes);
 
+	struct ct_stats *stats = map_lookup_elem(get_ct_stats_map4(), &expected_ct_tuple);
+
+	if (!stats)
+		test_fatal("no CT stats entry found");
+
+	assert(stats->tx_packets == count);
+	assert(stats->tx_bytes == bytes);
+
 	test_finish();
 }
 
@@ -337,6 +346,14 @@ int nodeport_lb4_fragments_2_check(struct __ctx_buff *ctx)
 	assert(ct_entry);
 	assert(ct_entry->packets == count);
 	assert(ct_entry->bytes == bytes);
+
+	struct ct_stats *stats = map_lookup_elem(get_ct_stats_map4(), &expected_ct_tuple);
+
+	if (!stats)
+		test_fatal("no CT stats entry found");
+
+	assert(stats->tx_packets == count);
+	assert(stats->tx_bytes == bytes);
 
 	test_finish();
 }
@@ -429,6 +446,14 @@ int nodeport_lb6_fragment1_check(struct __ctx_buff *ctx)
 	assert(ct_entry->packets == count);
 	assert(ct_entry->bytes == bytes);
 
+	struct ct_stats *stats = map_lookup_elem(get_ct_stats_map6(), &expected_ct_tuple);
+
+	if (!stats)
+		test_fatal("no CT stats entry found");
+
+	assert(stats->tx_packets == count);
+	assert(stats->tx_bytes == bytes);
+
 	test_finish();
 }
 
@@ -503,6 +528,14 @@ int nodeport_lb6_fragment2_check(struct __ctx_buff *ctx)
 	assert(ct_entry);
 	assert(ct_entry->packets == count);
 	assert(ct_entry->bytes == bytes);
+
+	struct ct_stats *stats = map_lookup_elem(get_ct_stats_map6(), &expected_ct_tuple);
+
+	if (!stats)
+		test_fatal("no CT stats entry found");
+
+	assert(stats->tx_packets == count);
+	assert(stats->tx_bytes == bytes);
 
 	test_finish();
 }

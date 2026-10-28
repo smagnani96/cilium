@@ -240,6 +240,7 @@ func newLocalNodeConfig(
 		EnableIPSec:                  ipsecCfg.Enabled(),
 		EncryptNode:                  daemon.EncryptNode,
 		EnableConntrackAccounting:    daemon.BPFConntrackAccounting,
+		EnableConntrackStats:         daemon.BPFConntrackStats,
 		IPv4PodSubnets:               podSubnets(cslices.Map(daemon.IPv4PodSubnets, ip.PrefixFrom), localNode.Local.IPv4PodSubnets),
 		IPv6PodSubnets:               podSubnets(cslices.Map(daemon.IPv6PodSubnets, ip.PrefixFrom), localNode.Local.IPv6PodSubnets),
 		XDPConfig:                    xdpConfig,

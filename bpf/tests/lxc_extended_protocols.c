@@ -28,6 +28,7 @@ ASSIGN_CONFIG(__u16, endpoint_id, 233)
 ASSIGN_CONFIG(union v4addr, endpoint_ipv4, { .be32 = v4_pod_one})
 ASSIGN_CONFIG(bool, enable_extended_ip_protocols, true);
 ASSIGN_CONFIG(bool, enable_conntrack_accounting, true)
+ASSIGN_CONFIG(bool, enable_conntrack_stats, true)
 
 #include "lib/endpoint.h"
 #include "lib/ipcache.h"
@@ -130,6 +131,13 @@ int lxc_igmp_egress_check(const struct __ctx_buff *ctx)
 		test_fatal("no CT entry found");
 
 	assert(ct_entry->packets == 1);
+
+	struct ct_stats *stats = map_lookup_elem(get_ct_stats_map4(), &tuple);
+
+	if (!stats)
+		test_fatal("no CT stats entry found");
+
+	assert(stats->tx_packets == 1);
 
 	policy_delete_egress_all_entry();
 

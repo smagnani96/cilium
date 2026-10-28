@@ -24,6 +24,7 @@ static volatile const __u8 *server_mac = mac_two;
 #include "lib/bpf_host.h"
 
 ASSIGN_CONFIG(bool, enable_conntrack_accounting, true)
+ASSIGN_CONFIG(bool, enable_conntrack_stats, true)
 
 #include "lib/endpoint.h"
 #include "lib/ipcache.h"
@@ -111,6 +112,13 @@ int hostfw_iptables_host_ipv4_01_pod_check(const struct __ctx_buff *ctx)
 
 	assert(ct_entry->packets == 1);
 
+	struct ct_stats *stats = map_lookup_elem(get_ct_stats_map4(), &tuple);
+
+	if (!stats)
+		test_fatal("no CT stats entry found");
+
+	assert(stats->tx_packets == 1);
+
 	policy_delete_egress_all_entry();
 
 	test_finish();
@@ -179,6 +187,14 @@ int hostfw_iptables_host_ipv4_02_pod_check(const struct __ctx_buff *ctx)
 		test_fatal("no CT entry found");
 
 	assert(ct_entry->packets == 2);
+
+	struct ct_stats *stats = map_lookup_elem(get_ct_stats_map4(), &tuple);
+
+	if (!stats)
+		test_fatal("no CT stats entry found");
+
+	assert(stats->tx_packets == 1);
+	assert(stats->rx_packets == 1);
 
 	policy_delete_ingress_all_entry();
 
@@ -315,6 +331,13 @@ int hostfw_iptables_host_ipv4_04_host_check(const struct __ctx_buff *ctx)
 
 	assert(ct_entry->packets == 1);
 
+	struct ct_stats *stats = map_lookup_elem(get_ct_stats_map4(), &tuple);
+
+	if (!stats)
+		test_fatal("no CT stats entry found");
+
+	assert(stats->tx_packets == 1);
+
 	policy_delete_egress_all_entry();
 
 	test_finish();
@@ -383,6 +406,14 @@ int hostfw_iptables_host_ipv4_05_host_check(const struct __ctx_buff *ctx)
 		test_fatal("no CT entry found");
 
 	assert(ct_entry->packets == 2);
+
+	struct ct_stats *stats = map_lookup_elem(get_ct_stats_map4(), &tuple);
+
+	if (!stats)
+		test_fatal("no CT stats entry found");
+
+	assert(stats->tx_packets == 1);
+	assert(stats->rx_packets == 1);
 
 	policy_delete_ingress_all_entry();
 
