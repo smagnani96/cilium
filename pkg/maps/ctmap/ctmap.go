@@ -441,11 +441,12 @@ func (m *Map) doGCForFamily(filter GCFilter, next4, next6 func(GCEvent), ipv6 bo
 	globalDeleteLock[m.mapType].Lock()
 	if ipv6 {
 		filterCallback := m.cleanup(filter, natMap, &stats, next6, ipv6)
-		stats.dumpError = iterate[CtKey6Global, CtEntry](m, &stats, filterCallback)
+		stats.dumpError = iterate[CtKey6Global, CtEntry](&m.Map, filterCallback)
 	} else {
 		filterCallback := m.cleanup(filter, natMap, &stats, next4, ipv6)
-		stats.dumpError = iterate[CtKey4Global, CtEntry](m, &stats, filterCallback)
+		stats.dumpError = iterate[CtKey4Global, CtEntry](&m.Map, filterCallback)
 	}
+	stats.Completed = true
 	globalDeleteLock[m.mapType].Unlock()
 
 	return stats
@@ -488,16 +489,6 @@ func (m *Map) purgeCtEntry(key CtKey, tupleKey tupleKeyAccessor, scratch *CtEntr
 	})
 
 	return nil
-}
-
-func iterate[KT any, VT any, KP bpf.KeyPointer[KT], VP bpf.ValuePointer[VT]](m *Map, stats *gcStats, filterCallback func(key bpf.MapKey, value bpf.MapValue)) error {
-	ctx := context.Background()
-	seq, errFn := bpf.BatchIterate[KT, VT, KP, VP](ctx, &m.Map)
-	for k, v := range seq {
-		filterCallback(k, v)
-	}
-	stats.Completed = true
-	return errFn()
 }
 
 var _ tupleKeyAccessor = &tuple.TupleKey4{}

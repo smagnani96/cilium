@@ -808,6 +808,9 @@ func HaveMapLookupAndDelete(mt ebpf.MapType) error {
 	}
 }
 
+// Probes whether the kernel supports lookup and delete on LRU hash maps.
+var HaveLRUHashLookupAndDelete = sync.OnceValue(func() error { return HaveMapLookupAndDelete(ebpf.LRUHash) })
+
 // Probes whether the kernel supports BIG TCP IPv4.
 var HaveBIGTCPIPv4 = sync.OnceValue(func() error {
 	link, err := safenetlink.LinkByName("lo")
