@@ -480,6 +480,15 @@ const (
 	// table.
 	CTMapEntriesGlobalAnyName = "bpf-ct-global-any-max"
 
+	// CTStatsMapEntriesDefault is the default maximum number of entries in
+	// the CT stats maps, mirroring the combined TCP and non-TCP CT map sizes.
+	CTStatsMapEntriesDefault = CTMapEntriesGlobalTCPDefault + CTMapEntriesGlobalAnyDefault
+
+	// CTStatsMapMaxName configures the maximum number of entries in the
+	// CT stats maps (one for IPv4, one for IPv6). When unset, the maps are
+	// sized to CTMapEntriesGlobalTCP + CTMapEntriesGlobalAny.
+	CTStatsMapMaxName = "bpf-ct-stats-map-max"
+
 	// CTMapEntriesTimeout* name option and default value mappings
 	CTMapEntriesTimeoutSYNName         = "bpf-ct-timeout-regular-tcp-syn"
 	CTMapEntriesTimeoutFINName         = "bpf-ct-timeout-regular-tcp-fin"
@@ -932,6 +941,9 @@ const (
 	// BPFConntrackAccounting controls whether CT accounting for packets and bytes is enabled
 	BPFConntrackAccounting = "bpf-conntrack-accounting"
 
+	// BPFConntrackStats controls whether per-direction statistics in the CT stats map are enabled
+	BPFConntrackStats = "bpf-ct-stats"
+
 	// EnableNonDefaultDenyPolicies allows policies to define whether they are operating in default-deny mode
 	EnableNonDefaultDenyPolicies = "enable-non-default-deny-policies"
 
@@ -1240,6 +1252,11 @@ type DaemonConfig struct {
 	// CTMapEntriesGlobalAny is the maximum number of conntrack entries
 	// allowed in each non-TCP CT table for IPv4/IPv6.
 	CTMapEntriesGlobalAny int
+
+	// CTStatsMapEntries is the maximum number of entries allowed in
+	// each (IPv4/IPv6) CT stats map. Only meaningful when
+	// BPFConntrackStats is enabled.
+	CTStatsMapEntries int
 
 	// CTMapEntriesTimeout* values configured by the user.
 	CTMapEntriesTimeoutTCP         time.Duration
@@ -1689,6 +1706,10 @@ type DaemonConfig struct {
 	// map.
 	SizeofSockRevElement int
 
+	// SizeofCTStatsElement is the size of an element (key + value) in the CT
+	// stats map.
+	SizeofCTStatsElement int
+
 	// Install ingress/egress routes through uplink on host for Pods when working with
 	// delegated IPAM plugin.
 	InstallUplinkRoutesForDelegatedIPAM bool
@@ -1742,6 +1763,9 @@ type DaemonConfig struct {
 
 	// BPFConntrackAccounting controls whether CT accounting for packets and bytes is enabled.
 	BPFConntrackAccounting bool
+
+	// BPFConntrackStats controls whether per-direction statistics in the CT stats map are enabled.
+	BPFConntrackStats bool
 
 	// IPAMCiliumNodeUpdateRate is the maximum rate at which the CiliumNode custom
 	// resource is updated.
@@ -1858,6 +1882,7 @@ var Config = &DaemonConfig{
 	BPFEventsPolicyVerdictEnabled: defaults.BPFEventsPolicyVerdictEnabled,
 	BPFEventsTraceEnabled:         defaults.BPFEventsTraceEnabled,
 	BPFConntrackAccounting:        defaults.BPFConntrackAccounting,
+	BPFConntrackStats:             defaults.BPFConntrackStats,
 	EnableEnvoyConfig:             defaults.EnableEnvoyConfig,
 
 	EnableNonDefaultDenyPolicies: defaults.EnableNonDefaultDenyPolicies,
@@ -2472,6 +2497,7 @@ func (c *DaemonConfig) Populate(logger *slog.Logger, vp *viper.Viper) {
 	c.BPFEventsPolicyVerdictEnabled = vp.GetBool(BPFEventsPolicyVerdictEnabled)
 	c.BPFEventsTraceEnabled = vp.GetBool(BPFEventsTraceEnabled)
 	c.BPFConntrackAccounting = vp.GetBool(BPFConntrackAccounting)
+	c.BPFConntrackStats = vp.GetBool(BPFConntrackStats)
 	c.BootIDFile = vp.GetString(BootIDFilename)
 	c.EnableExtendedIPProtocols = vp.GetBool(EnableExtendedIPProtocols)
 	c.IPTracingOptionType = vp.GetUint(IPTracingOptionType)
@@ -2883,6 +2909,16 @@ func (c *DaemonConfig) checkMapSizeLimits() error {
 		return fmt.Errorf("specified CT tables values %d/%d must not exceed maximum %d",
 			c.CTMapEntriesGlobalTCP, c.CTMapEntriesGlobalAny, LimitTableMax)
 	}
+	if c.BPFConntrackStats {
+		if c.CTStatsMapEntries < LimitTableMin {
+			return fmt.Errorf("specified CT stats map max entries %d must be greater or equal to %d",
+				c.CTStatsMapEntries, LimitTableMin)
+		}
+		if c.CTStatsMapEntries > LimitTableMax {
+			return fmt.Errorf("specified CT stats map max entries %d must not exceed maximum %d",
+				c.CTStatsMapEntries, LimitTableMax)
+		}
+	}
 
 	if c.NATMapEntriesGlobal < LimitTableMin {
 		return fmt.Errorf("specified NAT table size %d must be greater or equal to %d",
@@ -2995,7 +3031,25 @@ func (c *DaemonConfig) calculateBPFMapSizes(logger *slog.Logger, vp *viper.Viper
 	c.CTMapEntriesGlobalAny = vp.GetInt(CTMapEntriesGlobalAnyName)
 	c.NATMapEntriesGlobal = vp.GetInt(NATMapEntriesGlobalName)
 	c.NeighMapEntriesGlobal = vp.GetInt(NeighMapEntriesGlobalName)
+	c.CTStatsMapEntries = vp.GetInt(CTStatsMapMaxName)
 	c.PolicyMapFullReconciliationInterval = vp.GetDuration(PolicyMapFullReconciliationIntervalName)
+
+	// Independent of whether dynamic sizing applies below, the stats maps
+	// always mirror the final CT TCP + Any sizes unless the user explicitly
+	// override bpf-ct-stats-map-max. The CPU-alignment step is left for later.
+	defer func() {
+		if !c.BPFConntrackStats {
+			return
+		}
+
+		if !vp.IsSet(CTStatsMapMaxName) {
+			c.CTStatsMapEntries = c.CTMapEntriesGlobalTCP + c.CTMapEntriesGlobalAny
+			logger.Info(fmt.Sprintf("option %s set by dynamic sizing to %v",
+				CTStatsMapMaxName, c.CTStatsMapEntries))
+		} else {
+			logger.Debug(fmt.Sprintf("option %s set by user to %v", CTStatsMapMaxName, c.CTStatsMapEntries))
+		}
+	}()
 
 	// Don't attempt dynamic sizing if any of the sizeof members was not
 	// populated by the daemon (or any other caller).
@@ -3036,12 +3090,14 @@ func (c *DaemonConfig) SetMapElementSizes(
 	sizeofCTElement,
 	sizeofNATElement,
 	sizeofNeighElement,
-	sizeofSockRevElement int,
+	sizeofSockRevElement,
+	sizeofCTStatsElement int,
 ) {
 	c.SizeofCTElement = sizeofCTElement
 	c.SizeofNATElement = sizeofNATElement
 	c.SizeofNeighElement = sizeofNeighElement
 	c.SizeofSockRevElement = sizeofSockRevElement
+	c.SizeofCTStatsElement = sizeofCTStatsElement
 }
 
 func (c *DaemonConfig) GetDynamicSizeCalculator(logger *slog.Logger) func(def int, min int, max int) int {
@@ -3082,7 +3138,10 @@ func (c *DaemonConfig) getDynamicSizeCalculator(logger *slog.Logger, dynamicSize
 		// Neigh table has the same number of entries as NAT Map has.
 		NATMapEntriesGlobalDefault*c.SizeofNeighElement +
 		SockRevNATMapEntriesDefault*c.SizeofSockRevElement
-	logger.Debug(fmt.Sprintf("Total memory for default map entdries: %d", totalMapMemoryDefault))
+	if c.BPFConntrackStats {
+		totalMapMemoryDefault += CTStatsMapEntriesDefault * c.SizeofCTStatsElement
+	}
+	logger.Debug(fmt.Sprintf("Total memory for default map entries: %d", totalMapMemoryDefault))
 
 	// In case of distributed LRU, we need to round up to the number of possible CPUs
 	// since this is also what the kernel does internally, see htab_map_alloc()'s:
@@ -3163,6 +3222,7 @@ func (c *DaemonConfig) normalizeLRUBackedMapSizes(logger *slog.Logger) {
 	c.CTMapEntriesGlobalAny = c.AlignMapSizeForLRU(logger, CTMapEntriesGlobalAnyName, c.CTMapEntriesGlobalAny)
 	c.NeighMapEntriesGlobal = c.AlignMapSizeForLRU(logger, NeighMapEntriesGlobalName, c.NeighMapEntriesGlobal)
 	c.NATMapEntriesGlobal = c.AlignMapSizeForLRU(logger, NATMapEntriesGlobalName, c.NATMapEntriesGlobal)
+	c.CTStatsMapEntries = c.AlignMapSizeForLRU(logger, CTStatsMapMaxName, c.CTStatsMapEntries)
 }
 
 // AlignMapSizeForLRU adjusts a map size so that it matches the kernel-side rounding

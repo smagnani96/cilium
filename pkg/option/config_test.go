@@ -1055,6 +1055,91 @@ func TestBPFMapSizeCalculation(t *testing.T) {
 				vp.Set(BPFDistributedLRU, true)
 			},
 		},
+		{
+			name:        "dynamic size with bpf conntrack stats enabled, forces floor sizes (16GiB, 0.25%)",
+			totalMemory: 16 * GiB,
+			ratio:       0.0025,
+			want: sizes{
+				CTMapSizeTCP: LimitTableAutoGlobalTCPMin,
+				CTMapSizeAny: LimitTableAutoGlobalAnyMin,
+				NATMapSize:   LimitTableAutoNatGlobalMin,
+				NeighMapSize: LimitTableAutoNatGlobalMin,
+			},
+			preTestRun: func(vp *viper.Viper) {
+				vp.Set(BPFConntrackStats, true)
+			},
+		},
+		{
+			name:        "dynamic size with bpf conntrack stats enabled (2TiB, 0.25%)",
+			totalMemory: 2048 * GiB,
+			ratio:       0.0025,
+			want: sizes{
+				CTMapSizeTCP: 14979722,
+				CTMapSizeAny: 7489861,
+				NATMapSize:   14979722,
+				NeighMapSize: 14979722,
+			},
+			preTestRun: func(vp *viper.Viper) {
+				vp.Set(BPFConntrackStats, true)
+			},
+		},
+		{
+			name:        "dynamic size with bpf conntrack stats enabled (512GiB, 1%)",
+			totalMemory: 512 * GiB,
+			ratio:       0.01,
+			want: sizes{
+				CTMapSizeTCP: 14979722,
+				CTMapSizeAny: 7489861,
+				NATMapSize:   14979722,
+				NeighMapSize: 14979722,
+			},
+			preTestRun: func(vp *viper.Viper) {
+				vp.Set(BPFConntrackStats, true)
+			},
+		},
+		{
+			name:        "dynamic size with bpf conntrack stats and distributed LRU (512GiB, 1%)",
+			totalMemory: 512 * GiB,
+			ratio:       0.01,
+			want: sizes{
+				CTMapSizeTCP: util.RoundUp(14979722, cpus),
+				CTMapSizeAny: util.RoundUp(7489861, cpus),
+				NATMapSize:   util.RoundUp(14979722, cpus),
+				NeighMapSize: util.RoundUp(14979722, cpus),
+			},
+			preTestRun: func(vp *viper.Viper) {
+				vp.Set(BPFConntrackStats, true)
+				vp.Set(BPFDistributedLRU, true)
+			},
+		},
+		{
+			name:        "dynamic size with bpf conntrack stats enabled, less memory, higher ratio (8GiB, 50%)",
+			totalMemory: 8 * GiB,
+			ratio:       0.5,
+			want: sizes{
+				CTMapSizeTCP: 11702908,
+				CTMapSizeAny: 5851454,
+				NATMapSize:   11702908,
+				NeighMapSize: 11702908,
+			},
+			preTestRun: func(vp *viper.Viper) {
+				vp.Set(BPFConntrackStats, true)
+			},
+		},
+		{
+			name:        "dynamic size with bpf conntrack stats enabled, huge ratio gets clamped (4TiB, 98%)",
+			totalMemory: 4096 * GiB,
+			ratio:       0.98,
+			want: sizes{
+				CTMapSizeTCP: LimitTableMax,
+				CTMapSizeAny: LimitTableMax,
+				NATMapSize:   LimitTableMax,
+				NeighMapSize: LimitTableMax,
+			},
+			preTestRun: func(vp *viper.Viper) {
+				vp.Set(BPFConntrackStats, true)
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -1071,6 +1156,7 @@ func TestBPFMapSizeCalculation(t *testing.T) {
 				NATMapEntriesGlobal:   vp.GetInt(NATMapEntriesGlobalName),
 				NeighMapEntriesGlobal: vp.GetInt(NeighMapEntriesGlobalName),
 				BPFDistributedLRU:     vp.GetBool(BPFDistributedLRU),
+				BPFConntrackStats:     vp.GetBool(BPFConntrackStats),
 			}
 
 			// cannot set these from the Sizeof* consts from
@@ -1080,6 +1166,7 @@ func TestBPFMapSizeCalculation(t *testing.T) {
 				94, // nat.SizeofNATKey + nat.SizeofNATEntry
 				24, // neighborsmap.SizeofNeighKey6 + neighborsmap.SizeOfNeighValue
 				48, // lbmap.SizeofSockRevNat6Key+lbmap.SizeofSockRevNat6Value
+				56, // ctmap.SizeofCTKey + ctmap.SizeofStatsValue
 			)
 
 			if tt.totalMemory > 0 && tt.ratio > 0.0 {
@@ -1297,11 +1384,11 @@ func TestApiRateLimitValidation(t *testing.T) {
 	// These positive tests are regression tests, making sure validateConfigMapFlag accepts valid input.
 	assert.NoError(t, validateConfigMapFlag(apiRateLimit, name, "endpoint-create=rate-limit:100/s,rate-burst:300,max-wait-duration:60s,parallel-requests:300,log:true"), "must accept comma separated key value pairs")
 	assert.NoError(t, validateConfigMapFlag(apiRateLimit, name, "{}"), "must accept empty JSON object")
-	assert.NoError(t, validateConfigMapFlag(apiRateLimit, name, `{                                 
-		"endpoint-create": "auto-adjust:true,estimated-processing-duration:200ms,rate-limit:16/s,rate-burst:32,min-parallel-requests:16,max-parallel-requests:128,log:false", 
-		"endpoint-delete": "auto-adjust:true,estimated-processing-duration:200ms,rate-limit:16/s,rate-burst:32,min-parallel-requests:16,max-parallel-requests:128,log:false", 
-		"endpoint-get": "auto-adjust:true,estimated-processing-duration:100ms,rate-limit:16/s,rate-burst:32,min-parallel-requests:8,max-parallel-requests:16,log:false", 
-		"endpoint-list": "auto-adjust:true,estimated-processing-duration:300ms,rate-limit:16/s,rate-burst:32,min-parallel-requests:8,max-parallel-requests:16,log:false", 
+	assert.NoError(t, validateConfigMapFlag(apiRateLimit, name, `{
+		"endpoint-create": "auto-adjust:true,estimated-processing-duration:200ms,rate-limit:16/s,rate-burst:32,min-parallel-requests:16,max-parallel-requests:128,log:false",
+		"endpoint-delete": "auto-adjust:true,estimated-processing-duration:200ms,rate-limit:16/s,rate-burst:32,min-parallel-requests:16,max-parallel-requests:128,log:false",
+		"endpoint-get": "auto-adjust:true,estimated-processing-duration:100ms,rate-limit:16/s,rate-burst:32,min-parallel-requests:8,max-parallel-requests:16,log:false",
+		"endpoint-list": "auto-adjust:true,estimated-processing-duration:300ms,rate-limit:16/s,rate-burst:32,min-parallel-requests:8,max-parallel-requests:16,log:false",
 		"endpoint-patch": "auto-adjust:true,estimated-processing-duration:200ms,rate-limit:16/s,rate-burst:32,min-parallel-requests:16,max-parallel-requests:128,log:false"
 		}`), "must accept JSON object")
 }

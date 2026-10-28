@@ -509,6 +509,9 @@ const (
 	// BPFConntrackAccounting controls whether CT accounting for packets and bytes is enabled
 	BPFConntrackAccounting = false
 
+	// BPFConntrackStats controls whether per-direction statistics in the CT stats map are enabled
+	BPFConntrackStats = false
+
 	// EnableEnvoyConfig is the default value for option.EnableEnvoyConfig
 	EnableEnvoyConfig = false
 

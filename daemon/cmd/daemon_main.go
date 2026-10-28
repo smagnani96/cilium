@@ -821,7 +821,8 @@ func initDaemonConfigAndLogging(vp *viper.Viper) {
 		ctmap.SizeofCtKey6Global+ctmap.SizeofCtEntry,
 		nat.SizeofNatKey6+nat.SizeofNatEntry6,
 		neighborsmap.SizeofNeighKey6+neighborsmap.SizeOfNeighValue,
-		lbmaps.SizeofSockRevNat6Key+lbmaps.SizeofSockRevNat6Value)
+		lbmaps.SizeofSockRevNat6Key+lbmaps.SizeofSockRevNat6Value,
+		ctmap.SizeofCtKey6Global+ctmap.SizeofStatsValue)
 
 	option.Config.SetupLogging(vp, "cilium-agent")
 
