@@ -534,6 +534,20 @@
             "integer"
           ]
         },
+        "ctStats": {
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "mapMax": {
+              "type": [
+                "null",
+                "integer"
+              ]
+            }
+          },
+          "type": "object"
+        },
         "ctTcpMax": {
           "type": [
             "null",

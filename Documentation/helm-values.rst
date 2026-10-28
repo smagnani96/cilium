@@ -328,6 +328,14 @@
      - Configure the maximum number of entries for the non-TCP connection tracking table.
      - int
      - ``262144``
+   * - :spelling:ignore:`bpf.ctStats.enabled`
+     - Enable CT per-direction stats for packets and bytes
+     - bool
+     - ``false``
+   * - :spelling:ignore:`bpf.ctStats.mapMax`
+     - Configure the maximum number of entries in the connection tracking stats maps. When unset, it is auto-sized to match the combined TCP and non-TCP connection tracking table sizes.
+     - int
+     - auto-sized to the connection tracking table sizes
    * - :spelling:ignore:`bpf.ctTcpMax`
      - Configure the maximum number of entries in the TCP connection tracking table.
      - int
