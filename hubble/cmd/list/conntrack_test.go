@@ -35,6 +35,12 @@ func TestConntrackTableOutput(t *testing.T) {
 			Value:                   &conntrackpb.Value{},
 			DestinationServiceIndex: new(uint32(0)),
 		},
+		{
+			Key:                  &conntrackpb.Key{SourceIp: "10.0.0.4", SourcePort: 7, DestinationIp: "192.168.0.1", DestinationPort: 22, Protocol: 6},
+			Value:                &conntrackpb.Value{},
+			SourceNodeIndex:      new(uint32(7)), // never sent
+			DestinationNodeIndex: new(uint32(0)),
+		},
 	}
 
 	var buf bytes.Buffer
@@ -44,11 +50,15 @@ func TestConntrackTableOutput(t *testing.T) {
 	services := []*conntrackpb.IndexedService{
 		{Index: 0, Service: &flowpb.Service{Namespace: "default", Name: "web"}},
 	}
-	require.NoError(t, conntrackTableOutput(&buf, entries, endpoints, services, false))
+	nodes := []*conntrackpb.IndexedNode{
+		{Index: 0, Node: &conntrackpb.Node{Name: "worker", Cluster: "default"}},
+	}
+	require.NoError(t, conntrackTableOutput(&buf, entries, endpoints, services, nodes, false))
 
 	want := `SOURCE                        DESTINATION                                  PROTO   ALIVE   RX PACKETS   TX PACKETS   RX BYTES   TX BYTES
 10.0.0.1:1234                 10.0.0.9:80 (default/web, svc:default/web)   TCP     false   5            6            7          8
 10.0.0.3:99                   10.96.0.1:443 (svc:default/web)              TCP     false   0            0            0          0
+10.0.0.4:7                    192.168.0.1:22 (node:worker)                 TCP     false   0            0            0          0
 10.0.0.2:5353 (default/web)   10.0.0.9:53                                  UDP     true    1            2            3          4
 `
 	require.Equal(t, want, buf.String())
@@ -78,7 +88,7 @@ func TestConntrackTableOutputServiceEntries(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	require.NoError(t, conntrackTableOutput(&buf, entries, nil, services, false))
+	require.NoError(t, conntrackTableOutput(&buf, entries, nil, services, nil, false))
 	want := `SOURCE          DESTINATION                       PROTO   ALIVE   RX PACKETS   TX PACKETS   RX BYTES   TX BYTES
 10.0.0.1:1000   10.0.1.5:8080 (svc:default/web)   TCP     false   4            6            0          0
 10.0.0.2:2000   10.96.0.1:80 (svc:default/web)    TCP     false   0            0            0          0
@@ -86,7 +96,7 @@ func TestConntrackTableOutputServiceEntries(t *testing.T) {
 	require.Equal(t, want, buf.String())
 
 	buf.Reset()
-	require.NoError(t, conntrackTableOutput(&buf, entries, nil, services, true))
+	require.NoError(t, conntrackTableOutput(&buf, entries, nil, services, nil, true))
 	want = `SOURCE          DESTINATION                      PROTO   ALIVE   RX PACKETS   TX PACKETS   RX BYTES   TX BYTES
 10.0.0.1:1000   10.0.1.5:8080                    TCP     false   4            6            0          0
 10.0.0.1:1000   10.96.0.1:80 (svc:default/web)   TCP     false   0            6            0          0

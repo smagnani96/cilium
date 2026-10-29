@@ -81,6 +81,7 @@ func runListCTStats(ctx context.Context, cmd *cobra.Command, conn *grpc.ClientCo
 		entries   []*conntrackpb.Entry
 		endpoints []*conntrackpb.IndexedEndpoint
 		services  []*conntrackpb.IndexedService
+		nodes     []*conntrackpb.IndexedNode
 	)
 	for {
 		resp, err := stream.Recv()
@@ -102,6 +103,10 @@ func runListCTStats(ctx context.Context, cmd *cobra.Command, conn *grpc.ClientCo
 			services = append(services, svc)
 			continue
 		}
+		if n := resp.GetNode(); n != nil {
+			nodes = append(nodes, n)
+			continue
+		}
 		e := resp.GetEntry()
 		if e == nil {
 			continue
@@ -116,9 +121,9 @@ func runListCTStats(ctx context.Context, cmd *cobra.Command, conn *grpc.ClientCo
 
 	switch listOpts.output {
 	case "json":
-		return jsonOutput(cmd.OutOrStdout(), &conntrackJSONOutput{Endpoints: endpoints, Services: services, Entries: entries})
+		return jsonOutput(cmd.OutOrStdout(), &conntrackJSONOutput{Endpoints: endpoints, Services: services, Nodes: nodes, Entries: entries})
 	case "table":
-		return conntrackTableOutput(cmd.OutOrStdout(), entries, endpoints, services, listOpts.serviceEntries)
+		return conntrackTableOutput(cmd.OutOrStdout(), entries, endpoints, services, nodes, listOpts.serviceEntries)
 	default:
 		return fmt.Errorf("unknown output format: %s", listOpts.output)
 	}
@@ -127,17 +132,37 @@ func runListCTStats(ctx context.Context, cmd *cobra.Command, conn *grpc.ClientCo
 type conntrackJSONOutput struct {
 	Endpoints []*conntrackpb.IndexedEndpoint `json:"endpoints,omitempty"`
 	Services  []*conntrackpb.IndexedService  `json:"services,omitempty"`
+	Nodes     []*conntrackpb.IndexedNode     `json:"nodes,omitempty"`
 	Entries   []*conntrackpb.Entry           `json:"entries"`
 }
 
-func conntrackTableOutput(buf io.Writer, entries []*conntrackpb.Entry, endpoints []*conntrackpb.IndexedEndpoint, services []*conntrackpb.IndexedService, serviceEntries bool) error {
-	epByIndex := make(map[uint32]*flowpb.Endpoint, len(endpoints))
-	for _, ep := range endpoints {
-		epByIndex[ep.GetIndex()] = ep.GetEndpoint()
+type resolvedByIndex struct {
+	endpoints map[uint32]*flowpb.Endpoint
+	services  map[uint32]*flowpb.Service
+	nodes     map[uint32]*conntrackpb.Node
+}
+
+func conntrackTableOutput(
+	buf io.Writer,
+	entries []*conntrackpb.Entry,
+	endpoints []*conntrackpb.IndexedEndpoint,
+	services []*conntrackpb.IndexedService,
+	nodes []*conntrackpb.IndexedNode,
+	serviceEntries bool,
+) error {
+	byIndex := resolvedByIndex{
+		endpoints: make(map[uint32]*flowpb.Endpoint, len(endpoints)),
+		services:  make(map[uint32]*flowpb.Service, len(services)),
+		nodes:     make(map[uint32]*conntrackpb.Node, len(nodes)),
 	}
-	svcByIndex := make(map[uint32]*flowpb.Service, len(services))
+	for _, ep := range endpoints {
+		byIndex.endpoints[ep.GetIndex()] = ep.GetEndpoint()
+	}
 	for _, svc := range services {
-		svcByIndex[svc.GetIndex()] = svc.GetService()
+		byIndex.services[svc.GetIndex()] = svc.GetService()
+	}
+	for _, n := range nodes {
+		byIndex.nodes[n.GetIndex()] = n.GetNode()
 	}
 	var dstServices map[*conntrackpb.Entry]*uint32
 	if !serviceEntries {
@@ -148,8 +173,8 @@ func conntrackTableOutput(buf io.Writer, entries []*conntrackpb.Entry, endpoints
 	fmt.Fprintln(tw)
 	for _, v := range sortedEntries(entries) {
 		fmt.Fprint(tw,
-			formatAddr(v.GetKey().GetSourceIp(), v.GetKey().GetSourcePort(), v.SourceEndpointIndex, epByIndex, nil, svcByIndex), "\t",
-			formatAddr(v.GetKey().GetDestinationIp(), v.GetKey().GetDestinationPort(), v.DestinationEndpointIndex, epByIndex, dstServiceIndex(v, dstServices), svcByIndex), "\t",
+			formatAddr(v.GetKey().GetSourceIp(), v.GetKey().GetSourcePort(), v.SourceEndpointIndex, nil, v.SourceNodeIndex, byIndex), "\t",
+			formatAddr(v.GetKey().GetDestinationIp(), v.GetKey().GetDestinationPort(), v.DestinationEndpointIndex, dstServiceIndex(v, dstServices), v.DestinationNodeIndex, byIndex), "\t",
 			conntrackProtocolName(v.GetKey().GetProtocol()), "\t",
 			v.GetState().GetAlive(), "\t",
 			v.GetValue().GetRxPackets(), "\t",
@@ -214,23 +239,22 @@ func foldServiceEntries(entries []*conntrackpb.Entry) ([]*conntrackpb.Entry, map
 	return kept, folded
 }
 
-// formatAddr formats an address, followed by the names of its endpoint and
-// service if they were resolved.
-func formatAddr(
-	ip string, port uint32,
-	epIdx *uint32, endpoints map[uint32]*flowpb.Endpoint,
-	svcIdx *uint32, services map[uint32]*flowpb.Service,
-) string {
+func formatAddr(ip string, port uint32, epIdx, svcIdx, nodeIdx *uint32, byIndex resolvedByIndex) string {
 	addr := fmt.Sprintf("%s:%d", ip, port)
 	var names []string
 	if epIdx != nil {
-		if name := formatEndpoint(endpoints[*epIdx]); name != "" {
+		if name := formatEndpoint(byIndex.endpoints[*epIdx]); name != "" {
 			names = append(names, name)
 		}
 	}
 	if svcIdx != nil {
-		if svc := services[*svcIdx]; svc.GetName() != "" {
+		if svc := byIndex.services[*svcIdx]; svc.GetName() != "" {
 			names = append(names, "svc:"+svc.GetNamespace()+"/"+svc.GetName())
+		}
+	}
+	if nodeIdx != nil {
+		if n := byIndex.nodes[*nodeIdx]; n.GetName() != "" {
+			names = append(names, "node:"+n.GetName())
 		}
 	}
 	if len(names) == 0 {
