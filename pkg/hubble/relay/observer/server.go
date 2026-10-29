@@ -254,7 +254,7 @@ func (s *Server) GetNamespaces(ctx context.Context, req *observerpb.GetNamespace
 // by fanning out to every hubble peer and merging their own conntrack snapshots
 // into a single, cluster-wide snapshot.
 func (s *Server) GetConntrackStats(req *conntrackpb.GetStatsRequest, stream observerpb.Observer_GetConntrackStatsServer) error {
-	snap, err := s.ctExporter.Snapshot(stream.Context())
+	snap, err := s.ctExporter.Snapshot(stream.Context(), req.GetResolve())
 	if err != nil {
 		return err
 	}
@@ -302,7 +302,7 @@ func (s *Server) GetConntrackStats(req *conntrackpb.GetStatsRequest, stream obse
 // fetchConntrackSnapshots fans out a GetConntrackStats call to every
 // reachable peer and streams each response onto the returned
 // channel as soon as it is received, rather than buffering it.
-func (s *Server) fetchConntrackSnapshots(ctx context.Context) (<-chan *ctstats.PeerResponse, func() error) {
+func (s *Server) fetchConntrackSnapshots(ctx context.Context, resolve bool) (<-chan *ctstats.PeerResponse, func() error) {
 	if md, ok := metadata.FromIncomingContext(ctx); ok {
 		ctx = metadata.NewOutgoingContext(ctx, md)
 	}
@@ -311,7 +311,7 @@ func (s *Server) fetchConntrackSnapshots(ctx context.Context) (<-chan *ctstats.P
 	g, gctx := errgroup.WithContext(ctx)
 	peers := s.peers.List()
 	entries := make(chan *ctstats.PeerResponse, len(peers))
-	req := &conntrackpb.GetStatsRequest{}
+	req := &conntrackpb.GetStatsRequest{Resolve: resolve}
 
 	for _, p := range peers {
 		if !isAvailable(p.Conn) {

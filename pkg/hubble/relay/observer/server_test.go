@@ -1527,6 +1527,48 @@ func (b fakeObserverClientBuilder) observerClient(p *poolTypes.Peer) observerpb.
 	panic("OnObserverClient not set")
 }
 
+func TestGetConntrackStats_Resolve(t *testing.T) {
+	peers := []poolTypes.Peer{{
+		Peer: peerTypes.Peer{
+			Name:    "one",
+			Address: &net.TCPAddr{IP: net.ParseIP("192.0.2.1"), Port: defaults.ServerPort},
+		},
+		Conn: &testutils.FakeClientConn{OnGetState: func() connectivity.State { return connectivity.Ready }},
+	}}
+
+	var requested []bool
+	ocb := fakeObserverClientBuilder{
+		onObserverClient: func(*poolTypes.Peer) observerpb.ObserverClient {
+			return &testutils.FakeObserverClient{
+				OnGetConntrackStats: func(_ context.Context, in *conntrackpb.GetStatsRequest, _ ...grpc.CallOption) (observerpb.Observer_GetConntrackStatsClient, error) {
+					requested = append(requested, in.GetResolve())
+					return &testutils.FakeGetConntrackStatsClient{
+						OnRecv: func() (*conntrackpb.GetStatsResponse, error) { return nil, io.EOF },
+					}, nil
+				},
+			}
+		},
+	}
+
+	srv, err := NewServer(
+		&testutils.FakePeerLister{OnList: func() []poolTypes.Peer { return peers }},
+		WithLogger(slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))),
+		withObserverClientBuilder(ocb),
+	)
+	require.NoError(t, err)
+
+	stream := &testutils.FakeGetConntrackStatsServer{
+		FakeGRPCServerStream: &testutils.FakeGRPCServerStream{OnContext: context.TODO},
+		OnSend:               func(*conntrackpb.GetStatsResponse) error { return nil },
+	}
+	// The request is forwarded to the peers, and the snapshots with and
+	// without resolutions are not mixed up in the cache.
+	for _, resolve := range []bool{false, true, false, true} {
+		require.NoError(t, srv.GetConntrackStats(&conntrackpb.GetStatsRequest{Resolve: resolve}, stream))
+	}
+	require.Equal(t, []bool{false, true}, requested)
+}
+
 func TestGetConntrackStats_PeerError(t *testing.T) {
 	peers := []poolTypes.Peer{
 		{

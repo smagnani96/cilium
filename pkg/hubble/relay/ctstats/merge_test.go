@@ -436,7 +436,7 @@ func TestMergeConntrackResponses_Nodes(t *testing.T) {
 
 func TestExporterCache(t *testing.T) {
 	var fetches atomic.Int32
-	fetch := func(ctx context.Context) (<-chan *PeerResponse, func() error) {
+	fetch := func(ctx context.Context, _ bool) (<-chan *PeerResponse, func() error) {
 		fetches.Add(1)
 		ch := make(chan *PeerResponse, 1)
 		ch <- peerResp("node-a", entryResp(&conntrackpb.Entry{
@@ -449,7 +449,7 @@ func TestExporterCache(t *testing.T) {
 
 	e := NewStatsExporter(fetch, time.Hour)
 	for range 3 {
-		s, err := e.Snapshot(context.Background())
+		s, err := e.Snapshot(context.Background(), false)
 		require.NoError(t, err)
 		require.Len(t, slices.Collect(s.Entries()), 1)
 	}
@@ -458,7 +458,7 @@ func TestExporterCache(t *testing.T) {
 	// An expired cache triggers a new fetch.
 	e = NewStatsExporter(fetch, time.Nanosecond)
 	for range 2 {
-		_, err := e.Snapshot(context.Background())
+		_, err := e.Snapshot(context.Background(), false)
 		require.NoError(t, err)
 		time.Sleep(time.Millisecond)
 	}
@@ -467,7 +467,7 @@ func TestExporterCache(t *testing.T) {
 
 func TestExporterCache_ErrorNotCached(t *testing.T) {
 	var fetches atomic.Int32
-	fetch := func(ctx context.Context) (<-chan *PeerResponse, func() error) {
+	fetch := func(ctx context.Context, _ bool) (<-chan *PeerResponse, func() error) {
 		fetches.Add(1)
 		ch := make(chan *PeerResponse)
 		close(ch)
@@ -476,7 +476,7 @@ func TestExporterCache_ErrorNotCached(t *testing.T) {
 
 	e := NewStatsExporter(fetch, time.Hour)
 	for range 2 {
-		_, err := e.Snapshot(context.Background())
+		_, err := e.Snapshot(context.Background(), false)
 		require.Error(t, err)
 	}
 	require.EqualValues(t, 2, fetches.Load())

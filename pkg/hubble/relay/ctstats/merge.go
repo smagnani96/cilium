@@ -106,35 +106,40 @@ func (c *Snapshot) NodeStatuses() iter.Seq[*conntrackpb.GetStatsResponse] {
 // fetchTimeout bounds a cluster-wide fetch, which is shared by its callers.
 const fetchTimeout = time.Minute
 
-// StatsExporter is responsible for exporting conntrack stats retrieved from
-// multiple nodes. The merged Snapshot is cached for the ttl, so that concurrent
-// and subsequent clients are served without fanning out to the peers again.
+// StatsExporter merges the conntrack stats of the nodes, caching the Snapshot
+// for the ttl. Snapshots with and without resolutions are cached separately.
 type StatsExporter struct {
-	snapshot *ttlcache.Cache[*Snapshot]
+	snapshot         *ttlcache.Cache[*Snapshot]
+	resolvedSnapshot *ttlcache.Cache[*Snapshot]
 }
 
-func NewStatsExporter(fetch func(ctx context.Context) (<-chan *PeerResponse, func() error), ttl time.Duration) *StatsExporter {
-	return &StatsExporter{
-		snapshot: ttlcache.New(ttl, func(ctx context.Context) (*Snapshot, error) {
+func NewStatsExporter(fetch func(ctx context.Context, resolve bool) (<-chan *PeerResponse, func() error), ttl time.Duration) *StatsExporter {
+	newCached := func(resolve bool) *ttlcache.Cache[*Snapshot] {
+		return ttlcache.New(ttl, func(ctx context.Context) (*Snapshot, error) {
 			// Detach from the caller's cancellation, as the result is shared.
 			ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), fetchTimeout)
 			defer cancel()
 
-			responses, wait := fetch(ctx)
+			responses, wait := fetch(ctx, resolve)
 			snap := mergeConntrackResponses(responses)
 			if err := wait(); err != nil {
 				return nil, err
 			}
 			return snap, nil
-		}),
+		})
 	}
+	return &StatsExporter{snapshot: newCached(false), resolvedSnapshot: newCached(true)}
 }
 
-// Snapshot returns the conntrack stats from all the nodes, refreshing them
-// first if the cached ones are older than the ttl. The returned Snapshot is
-// shared and must not be modified.
-func (c *StatsExporter) Snapshot(ctx context.Context) (*Snapshot, error) {
-	snap, err := c.snapshot.Get(ctx)
+// Snapshot returns the cluster-wide conntrack stats. The nodes resolve
+// endpoints, services and nodes only if resolve is set. The returned Snapshot
+// is shared and must not be modified.
+func (c *StatsExporter) Snapshot(ctx context.Context, resolve bool) (*Snapshot, error) {
+	cached := c.snapshot
+	if resolve {
+		cached = c.resolvedSnapshot
+	}
+	snap, err := cached.Get(ctx)
 	if err != nil {
 		return nil, err
 	}
