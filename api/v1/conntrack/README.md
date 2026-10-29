@@ -5,6 +5,7 @@
 
 - [conntrack/conntrack.proto](#conntrack_conntrack-proto)
     - [Entry](#conntrack-Entry)
+    - [Filter](#conntrack-Filter)
     - [GetStatsRequest](#conntrack-GetStatsRequest)
     - [GetStatsResponse](#conntrack-GetStatsResponse)
     - [IndexedEndpoint](#conntrack-IndexedEndpoint)
@@ -48,6 +49,31 @@ Entry is an entry from a node&#39;s datapath conntrack stats map.
 
 
 
+<a name="conntrack-Filter"></a>
+
+### Filter
+Filter matches the entries that match all of its set fields. A repeated
+field matches if any of its values does.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| source_ip | [string](#string) | repeated | source_ip and destination_ip are addresses or CIDRs. |
+| destination_ip | [string](#string) | repeated |  |
+| source_port | [uint32](#uint32) | repeated |  |
+| destination_port | [uint32](#uint32) | repeated |  |
+| protocol | [uint32](#uint32) | repeated |  |
+| source_endpoint | [string](#string) | repeated | source_endpoint and destination_endpoint are &#34;[&lt;namespace&gt;/]&lt;name-prefix&gt;&#34; of the pod of the resolved endpoint. |
+| destination_endpoint | [string](#string) | repeated |  |
+| destination_service | [string](#string) | repeated | destination_service is &#34;[&lt;namespace&gt;/]&lt;name-prefix&gt;&#34; of the resolved service. |
+| source_node | [string](#string) | repeated | source_node and destination_node are &#34;[&lt;cluster&gt;/]&lt;name&gt;&#34; of the resolved node. |
+| destination_node | [string](#string) | repeated |  |
+
+
+
+
+
+
 <a name="conntrack-GetStatsRequest"></a>
 
 ### GetStatsRequest
@@ -57,6 +83,7 @@ GetStatsRequest is the request of the Observer.GetConntrackStats RPC.
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
 | resolve | [bool](#bool) |  | resolve makes the entries carry the endpoints, services and nodes of their addresses, which cost a lookup each. They are left out otherwise. |
+| filter | [Filter](#conntrack-Filter) |  | filter, if set, drops the entries that do not match it. The endpoint, service and node fields require resolve. |
 
 
 

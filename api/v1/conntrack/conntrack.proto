@@ -15,6 +15,35 @@ message GetStatsRequest {
     // resolve makes the entries carry the endpoints, services and nodes of
     // their addresses, which cost a lookup each. They are left out otherwise.
     bool resolve = 1;
+
+    // filter, if set, drops the entries that do not match it. The endpoint,
+    // service and node fields require resolve.
+    Filter filter = 2;
+}
+
+// Filter matches the entries that match all of its set fields. A repeated
+// field matches if any of its values does.
+message Filter {
+    // source_ip and destination_ip are addresses or CIDRs.
+    repeated string source_ip = 1;
+    repeated string destination_ip = 2;
+    repeated uint32 source_port = 3;
+    repeated uint32 destination_port = 4;
+    repeated uint32 protocol = 5;
+
+    // source_endpoint and destination_endpoint are "[<namespace>/]<name-prefix>"
+    // of the pod of the resolved endpoint.
+    repeated string source_endpoint = 6;
+    repeated string destination_endpoint = 7;
+
+    // destination_service is "[<namespace>/]<name-prefix>" of the resolved
+    // service.
+    repeated string destination_service = 8;
+
+    // source_node and destination_node are "[<cluster>/]<name>" of the
+    // resolved node.
+    repeated string source_node = 9;
+    repeated string destination_node = 10;
 }
 
 // GetStatsResponse streams the entries themselves, or a status update about
