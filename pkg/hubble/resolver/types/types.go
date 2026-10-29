@@ -6,6 +6,7 @@ package types
 import (
 	"net/netip"
 
+	conntrackpb "github.com/cilium/cilium/api/v1/conntrack"
 	flowpb "github.com/cilium/cilium/api/v1/flow"
 	cgroupManager "github.com/cilium/cilium/pkg/cgroups/manager"
 	"github.com/cilium/cilium/pkg/identity"
@@ -61,6 +62,12 @@ type IPGetter interface {
 // ServiceGetter fetches service metadata.
 type ServiceGetter interface {
 	GetServiceByAddr(ip netip.Addr, port uint16, proto u8proto.U8proto) *flowpb.Service
+}
+
+// NodeGetter fetches node metadata.
+type NodeGetter interface {
+	// GetNodeByAddr returns the node owning the given address.
+	GetNodeByAddr(ip netip.Addr) *conntrackpb.Node
 }
 
 // LinkGetter fetches local link information.
