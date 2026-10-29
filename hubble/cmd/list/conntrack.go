@@ -24,6 +24,7 @@ import (
 	"github.com/cilium/cilium/hubble/cmd/common/config"
 	"github.com/cilium/cilium/hubble/cmd/common/conn"
 	"github.com/cilium/cilium/hubble/cmd/common/template"
+	"github.com/cilium/cilium/pkg/ctstats"
 	"github.com/cilium/cilium/pkg/u8proto"
 )
 
@@ -52,6 +53,12 @@ func newCTStatsCommand(vp *viper.Viper) *cobra.Command {
  table:    Tab-aligned columns`)
 	conntrackCmd.Flags().AddFlagSet(formattingFlags)
 
+	enrichmentFlags := pflag.NewFlagSet("Enrichment", pflag.ContinueOnError)
+	enrichmentFlags.BoolVar(
+		&listOpts.serviceEntries, "service-entries", false,
+		"Show the service entries as separate rows in the table output, instead of folding them into the connection they belong to")
+	conntrackCmd.Flags().AddFlagSet(enrichmentFlags)
+
 	conntrackCmd.RegisterFlagCompletionFunc("output", func(_ *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
 		return []string{
 			"json",
@@ -59,7 +66,7 @@ func newCTStatsCommand(vp *viper.Viper) *cobra.Command {
 		}, cobra.ShellCompDirectiveDefault
 	})
 
-	template.RegisterFlagSets(conntrackCmd, formattingFlags, config.ServerFlags)
+	template.RegisterFlagSets(conntrackCmd, formattingFlags, enrichmentFlags, config.ServerFlags)
 	return conntrackCmd
 }
 
@@ -73,6 +80,7 @@ func runListCTStats(ctx context.Context, cmd *cobra.Command, conn *grpc.ClientCo
 	var (
 		entries   []*conntrackpb.Entry
 		endpoints []*conntrackpb.IndexedEndpoint
+		services  []*conntrackpb.IndexedService
 	)
 	for {
 		resp, err := stream.Recv()
@@ -90,6 +98,10 @@ func runListCTStats(ctx context.Context, cmd *cobra.Command, conn *grpc.ClientCo
 			endpoints = append(endpoints, ep)
 			continue
 		}
+		if svc := resp.GetService(); svc != nil {
+			services = append(services, svc)
+			continue
+		}
 		e := resp.GetEntry()
 		if e == nil {
 			continue
@@ -104,9 +116,9 @@ func runListCTStats(ctx context.Context, cmd *cobra.Command, conn *grpc.ClientCo
 
 	switch listOpts.output {
 	case "json":
-		return jsonOutput(cmd.OutOrStdout(), &conntrackJSONOutput{Endpoints: endpoints, Entries: entries})
+		return jsonOutput(cmd.OutOrStdout(), &conntrackJSONOutput{Endpoints: endpoints, Services: services, Entries: entries})
 	case "table":
-		return conntrackTableOutput(cmd.OutOrStdout(), entries, endpoints)
+		return conntrackTableOutput(cmd.OutOrStdout(), entries, endpoints, services, listOpts.serviceEntries)
 	default:
 		return fmt.Errorf("unknown output format: %s", listOpts.output)
 	}
@@ -114,21 +126,30 @@ func runListCTStats(ctx context.Context, cmd *cobra.Command, conn *grpc.ClientCo
 
 type conntrackJSONOutput struct {
 	Endpoints []*conntrackpb.IndexedEndpoint `json:"endpoints,omitempty"`
+	Services  []*conntrackpb.IndexedService  `json:"services,omitempty"`
 	Entries   []*conntrackpb.Entry           `json:"entries"`
 }
 
-func conntrackTableOutput(buf io.Writer, entries []*conntrackpb.Entry, endpoints []*conntrackpb.IndexedEndpoint) error {
-	byIndex := make(map[uint32]*flowpb.Endpoint, len(endpoints))
+func conntrackTableOutput(buf io.Writer, entries []*conntrackpb.Entry, endpoints []*conntrackpb.IndexedEndpoint, services []*conntrackpb.IndexedService, serviceEntries bool) error {
+	epByIndex := make(map[uint32]*flowpb.Endpoint, len(endpoints))
 	for _, ep := range endpoints {
-		byIndex[ep.GetIndex()] = ep.GetEndpoint()
+		epByIndex[ep.GetIndex()] = ep.GetEndpoint()
+	}
+	svcByIndex := make(map[uint32]*flowpb.Service, len(services))
+	for _, svc := range services {
+		svcByIndex[svc.GetIndex()] = svc.GetService()
+	}
+	var dstServices map[*conntrackpb.Entry]*uint32
+	if !serviceEntries {
+		entries, dstServices = foldServiceEntries(entries)
 	}
 	tw := tabwriter.NewWriter(buf, 2, 0, 3, ' ', 0)
 	fmt.Fprint(tw, "SOURCE\tDESTINATION\tPROTO\tALIVE\tRX PACKETS\tTX PACKETS\tRX BYTES\tTX BYTES")
 	fmt.Fprintln(tw)
 	for _, v := range sortedEntries(entries) {
 		fmt.Fprint(tw,
-			formatAddr(v.GetKey().GetSourceIp(), v.GetKey().GetSourcePort(), v.SourceEndpointIndex, byIndex), "\t",
-			formatAddr(v.GetKey().GetDestinationIp(), v.GetKey().GetDestinationPort(), v.DestinationEndpointIndex, byIndex), "\t",
+			formatAddr(v.GetKey().GetSourceIp(), v.GetKey().GetSourcePort(), v.SourceEndpointIndex, epByIndex, nil, svcByIndex), "\t",
+			formatAddr(v.GetKey().GetDestinationIp(), v.GetKey().GetDestinationPort(), v.DestinationEndpointIndex, epByIndex, dstServiceIndex(v, dstServices), svcByIndex), "\t",
 			conntrackProtocolName(v.GetKey().GetProtocol()), "\t",
 			v.GetState().GetAlive(), "\t",
 			v.GetValue().GetRxPackets(), "\t",
@@ -144,17 +165,78 @@ func conntrackTableOutput(buf io.Writer, entries []*conntrackpb.Entry, endpoints
 	return nil
 }
 
-// formatAddr formats an address, followed by the name of its endpoint if it
-// was resolved.
-func formatAddr(ip string, port uint32, epIdx *uint32, endpoints map[uint32]*flowpb.Endpoint) string {
+func dstServiceIndex(e *conntrackpb.Entry, folded map[*conntrackpb.Entry]*uint32) *uint32 {
+	if idx, ok := folded[e]; ok {
+		return idx
+	}
+	return e.DestinationServiceIndex
+}
+
+// foldServiceEntries drops the service entries, returning their service as the
+// destination service of the entry of the same connection. A service entry
+// without exactly one such entry is kept.
+func foldServiceEntries(entries []*conntrackpb.Entry) ([]*conntrackpb.Entry, map[*conntrackpb.Entry]*uint32) {
+	type connKey struct {
+		ip    string
+		port  uint32
+		proto uint32
+	}
+	keyOf := func(e *conntrackpb.Entry) connKey {
+		k := e.GetKey()
+		return connKey{k.GetSourceIp(), k.GetSourcePort(), k.GetProtocol()}
+	}
+	isService := func(e *conntrackpb.Entry) bool {
+		return e.GetKey().GetFlags()&ctstats.TupleFlagService != 0
+	}
+
+	conns := make(map[connKey][]*conntrackpb.Entry)
+	for _, e := range entries {
+		if !isService(e) {
+			conns[keyOf(e)] = append(conns[keyOf(e)], e)
+		}
+	}
+
+	folded := make(map[*conntrackpb.Entry]*uint32)
+	kept := make([]*conntrackpb.Entry, 0, len(entries))
+	for _, e := range entries {
+		if !isService(e) {
+			kept = append(kept, e)
+			continue
+		}
+		if c := conns[keyOf(e)]; len(c) == 1 && e.DestinationServiceIndex != nil {
+			if prev, ok := folded[c[0]]; !ok || *prev == *e.DestinationServiceIndex {
+				folded[c[0]] = e.DestinationServiceIndex
+				continue
+			}
+		}
+		kept = append(kept, e)
+	}
+	return kept, folded
+}
+
+// formatAddr formats an address, followed by the names of its endpoint and
+// service if they were resolved.
+func formatAddr(
+	ip string, port uint32,
+	epIdx *uint32, endpoints map[uint32]*flowpb.Endpoint,
+	svcIdx *uint32, services map[uint32]*flowpb.Service,
+) string {
 	addr := fmt.Sprintf("%s:%d", ip, port)
-	if epIdx == nil {
+	var names []string
+	if epIdx != nil {
+		if name := formatEndpoint(endpoints[*epIdx]); name != "" {
+			names = append(names, name)
+		}
+	}
+	if svcIdx != nil {
+		if svc := services[*svcIdx]; svc.GetName() != "" {
+			names = append(names, "svc:"+svc.GetNamespace()+"/"+svc.GetName())
+		}
+	}
+	if len(names) == 0 {
 		return addr
 	}
-	if name := formatEndpoint(endpoints[*epIdx]); name != "" {
-		return addr + " (" + name + ")"
-	}
-	return addr
+	return addr + " (" + strings.Join(names, ", ") + ")"
 }
 
 // formatEndpoint returns the namespace/pod name of ep if known, else its

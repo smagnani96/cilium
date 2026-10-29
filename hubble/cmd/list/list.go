@@ -16,7 +16,8 @@ import (
 )
 
 var listOpts struct {
-	output string
+	output         string
+	serviceEntries bool
 }
 
 // New creates a new list command.
