@@ -97,6 +97,7 @@ type hubbleParams struct {
 
 	CTStats        *ctstats.Cache
 	EndpointGetter resolverTypes.EndpointGetter
+	ServiceGetter  resolverTypes.ServiceGetter
 
 	// NOTE: ordering is not guaranteed, do not rely on it.
 	ObserverOptions  []observeroption.Option                `group:"hubble-observer-options"`
@@ -131,6 +132,7 @@ func newHubbleIntegration(params hubbleParams) (HubbleIntegration, error) {
 		params.TLSConfigPromise,
 		params.CTStats,
 		params.EndpointGetter,
+		params.ServiceGetter,
 		params.ObserverOptions,
 		params.ExporterBuilders,
 		params.DropEventEmitter,

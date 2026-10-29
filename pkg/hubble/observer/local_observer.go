@@ -289,6 +289,17 @@ func (s *LocalObserverServer) GetConntrackStats(
 		}
 	}
 
+	for svc := range snap.Services() {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := server.Send(&conntrackpb.GetStatsResponse{
+			ResponseTypes: &conntrackpb.GetStatsResponse_Service{Service: svc},
+		}); err != nil {
+			return err
+		}
+	}
+
 	for e := range snap.Entries() {
 		if err := ctx.Err(); err != nil {
 			return err

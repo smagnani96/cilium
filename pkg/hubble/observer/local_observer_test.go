@@ -795,7 +795,7 @@ func TestLocalObserverServer_GetConntrackStats(t *testing.T) {
 			yield(tuple, ctstats.Value{RxPackets: 1, TxPackets: 2, RxBytes: 3, TxBytes: 4})
 			return nil
 		}, time.Minute, 10)
-		exporter := observerctstats.NewExporter(cache, &testutils.NoopEndpointGetter)
+		exporter := observerctstats.NewExporter(cache, &testutils.NoopEndpointGetter, &testutils.NoopServiceGetter)
 		s, err := NewLocalServer(pp, nm, exporter, hivetest.Logger(t))
 		require.NoError(t, err)
 

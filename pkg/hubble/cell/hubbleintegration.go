@@ -69,6 +69,7 @@ type hubbleIntegration struct {
 	tlsConfigPromise  tlsConfigPromise
 	ctStats           *ctstats.Cache
 	endpointGetter    resolverTypes.EndpointGetter
+	serviceGetter     resolverTypes.ServiceGetter
 	exporters         []exporter.FlowLogExporter
 
 	// dropEventEmitter emits Kubernetes events for packet drops.
@@ -99,6 +100,7 @@ func createHubbleIntegration(
 	tlsConfigPromise tlsConfigPromise,
 	ctStats *ctstats.Cache,
 	endpointGetter resolverTypes.EndpointGetter,
+	serviceGetter resolverTypes.ServiceGetter,
 	observerOptions []observeroption.Option,
 	exporterBuilders []*exportercell.FlowLogExporterBuilder,
 	dropEventEmitter dropeventemitter.FlowProcessor,
@@ -131,6 +133,7 @@ func createHubbleIntegration(
 		tlsConfigPromise:     tlsConfigPromise,
 		ctStats:              ctStats,
 		endpointGetter:       endpointGetter,
+		serviceGetter:        serviceGetter,
 		observerOptions:      observerOptions,
 		exporters:            exporters,
 		dropEventEmitter:     dropEventEmitter,
@@ -276,7 +279,7 @@ func (h *hubbleIntegration) launch(ctx context.Context) (*observer.LocalObserver
 
 	var ctExporter *observerctstats.Exporter
 	if h.ctStats != nil {
-		ctExporter = observerctstats.NewExporter(h.ctStats, h.endpointGetter)
+		ctExporter = observerctstats.NewExporter(h.ctStats, h.endpointGetter, h.serviceGetter)
 	}
 
 	hubbleObserver, err := observer.NewLocalServer(

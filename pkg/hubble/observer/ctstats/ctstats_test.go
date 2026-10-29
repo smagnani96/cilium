@@ -17,6 +17,7 @@ import (
 	"github.com/cilium/cilium/pkg/ctstats"
 	resolverTypes "github.com/cilium/cilium/pkg/hubble/resolver/types"
 	"github.com/cilium/cilium/pkg/hubble/testutils"
+	"github.com/cilium/cilium/pkg/u8proto"
 )
 
 func TestSnapshotEntries(t *testing.T) {
@@ -41,7 +42,7 @@ func TestSnapshotEntries(t *testing.T) {
 		}(): {Alive: true},
 	}}
 
-	e := &Exporter{epGetter: &testutils.NoopEndpointGetter}
+	e := &Exporter{epGetter: &testutils.NoopEndpointGetter, svcGetter: &testutils.NoopServiceGetter}
 	got := slices.Collect(e.resolve(stats).Entries())
 	require.Len(t, got, 3)
 
@@ -102,7 +103,7 @@ func TestExporterEndpoints(t *testing.T) {
 		}
 		return nil
 	}, time.Hour, 10)
-	exporter := NewExporter(cache, epGetter)
+	exporter := NewExporter(cache, epGetter, &testutils.NoopServiceGetter)
 
 	var snap *Snapshot
 	for range 3 {
@@ -141,7 +142,7 @@ func TestExporterEndpoints(t *testing.T) {
 	exporter = NewExporter(ctstats.New(func(_ context.Context, yield func(ctstats.Tuple, ctstats.Value) bool) error {
 		yield(conns[0], ctstats.Value{})
 		return nil
-	}, time.Nanosecond, 10), epGetter)
+	}, time.Nanosecond, 10), epGetter, &testutils.NoopServiceGetter)
 	resolutions.Store(0)
 	for range 2 {
 		_, err := exporter.Snapshot(t.Context())
@@ -149,4 +150,72 @@ func TestExporterEndpoints(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 	require.EqualValues(t, 4, resolutions.Load())
+}
+
+func TestExporterServices(t *testing.T) {
+	var (
+		client  = netip.MustParseAddr("10.0.0.1")
+		backend = netip.MustParseAddr("10.0.0.2")
+		vip     = netip.MustParseAddr("10.96.0.1")
+	)
+	var lookups atomic.Int32
+	svcGetter := &testutils.FakeServiceGetter{
+		OnGetServiceByAddr: func(ip netip.Addr, port uint16, proto u8proto.U8proto) *flowpb.Service {
+			lookups.Add(1)
+			if ip == vip && port == 80 && proto == u8proto.TCP {
+				return &flowpb.Service{Namespace: "default", Name: "web"}
+			}
+			return nil
+		},
+	}
+
+	svc := func(t ctstats.Tuple) ctstats.Tuple {
+		t.Flags = ctstats.TupleFlagService
+		return t
+	}
+	conns := []ctstats.Tuple{
+		svc(ctstats.Tuple{Src: client, Dst: vip, SrcPort: 1, DstPort: 80, Proto: 6}),
+		svc(ctstats.Tuple{Src: client, Dst: vip, SrcPort: 2, DstPort: 80, Proto: 6}),
+		// The protocol is part of the lookup.
+		svc(ctstats.Tuple{Src: client, Dst: vip, SrcPort: 3, DstPort: 80, Proto: 17}),
+		// Regular entries are keyed by the backend, hence never looked up.
+		{Src: vip, Dst: client, SrcPort: 80, DstPort: 4, Proto: 6},
+		{Src: client, Dst: backend, SrcPort: 5, DstPort: 8080, Proto: 6},
+	}
+	cache := ctstats.New(func(_ context.Context, yield func(ctstats.Tuple, ctstats.Value) bool) error {
+		for _, c := range conns {
+			yield(c, ctstats.Value{})
+		}
+		return nil
+	}, time.Hour, 10)
+	exporter := NewExporter(cache, &testutils.NoopEndpointGetter, svcGetter)
+
+	var snap *Snapshot
+	for range 3 {
+		var err error
+		snap, err = exporter.Snapshot(t.Context())
+		require.NoError(t, err)
+	}
+	// Each address, port and protocol of a service entry only once despite
+	// the repeated calls.
+	require.EqualValues(t, 2, lookups.Load())
+
+	var services []*flowpb.Service
+	for svc := range snap.Services() {
+		require.EqualValues(t, len(services), svc.GetIndex())
+		services = append(services, svc.GetService())
+	}
+	require.Len(t, services, 1, "all the matches must share the service")
+	require.Equal(t, "web", services[0].GetName())
+
+	for e := range snap.Entries() {
+		switch e.GetKey().GetSourcePort() {
+		case 1, 2:
+			require.EqualValues(t, 0, e.GetDestinationServiceIndex())
+		case 3:
+			require.Nil(t, e.DestinationServiceIndex, "unresolved service must be unset")
+		case 5, 80:
+			require.Nil(t, e.DestinationServiceIndex, "regular entries must not be looked up")
+		}
+	}
 }
