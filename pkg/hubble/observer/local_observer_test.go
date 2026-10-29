@@ -808,7 +808,7 @@ func TestLocalObserverServer_GetConntrackStats(t *testing.T) {
 		require.NoError(t, err)
 
 		var got []*conntrackpb.GetStatsResponse
-		err = s.GetConntrackStats(&conntrackpb.GetStatsRequest{}, &testutils.FakeGetConntrackStatsServer{
+		err = s.GetConntrackStats(&conntrackpb.GetStatsRequest{Resolve: true}, &testutils.FakeGetConntrackStatsServer{
 			OnSend: func(r *conntrackpb.GetStatsResponse) error {
 				got = append(got, r)
 				return nil
@@ -829,6 +829,22 @@ func TestLocalObserverServer_GetConntrackStats(t *testing.T) {
 		require.EqualValues(t, 80, e.GetKey().GetDestinationPort())
 		require.EqualValues(t, 4, e.GetValue().GetTxBytes())
 		require.True(t, e.GetState().GetAlive())
+
+		// Nothing is resolved unless requested.
+		got = nil
+		err = s.GetConntrackStats(&conntrackpb.GetStatsRequest{}, &testutils.FakeGetConntrackStatsServer{
+			OnSend: func(r *conntrackpb.GetStatsResponse) error {
+				got = append(got, r)
+				return nil
+			},
+			FakeGRPCServerStream: &testutils.FakeGRPCServerStream{OnContext: t.Context},
+		})
+		require.NoError(t, err)
+		require.Len(t, got, 1)
+		e = got[0].GetEntry()
+		require.Nil(t, e.SourceEndpointIndex)
+		require.Nil(t, e.DestinationEndpointIndex)
+		require.Nil(t, e.SourceNodeIndex)
 	})
 }
 

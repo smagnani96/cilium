@@ -109,7 +109,7 @@ func TestExporterEndpoints(t *testing.T) {
 	var snap *Snapshot
 	for range 3 {
 		var err error
-		snap, err = exporter.Snapshot(t.Context())
+		snap, err = exporter.Snapshot(t.Context(), true)
 		require.NoError(t, err)
 	}
 	// web, webV6, db and world, only once despite the repeated calls. The
@@ -146,7 +146,7 @@ func TestExporterEndpoints(t *testing.T) {
 	}, time.Nanosecond, 10), epGetter, &testutils.NoopServiceGetter, &testutils.NoopNodeGetter)
 	resolutions.Store(0)
 	for range 2 {
-		_, err := exporter.Snapshot(t.Context())
+		_, err := exporter.Snapshot(t.Context(), true)
 		require.NoError(t, err)
 		time.Sleep(time.Millisecond)
 	}
@@ -194,7 +194,7 @@ func TestExporterServices(t *testing.T) {
 	var snap *Snapshot
 	for range 3 {
 		var err error
-		snap, err = exporter.Snapshot(t.Context())
+		snap, err = exporter.Snapshot(t.Context(), true)
 		require.NoError(t, err)
 	}
 	// Each address, port and protocol of a service entry only once despite
@@ -219,6 +219,43 @@ func TestExporterServices(t *testing.T) {
 			require.Nil(t, e.DestinationServiceIndex, "regular entries must not be looked up")
 		}
 	}
+}
+
+func TestExporterNoResolve(t *testing.T) {
+	var lookups atomic.Int32
+	epGetter := &testutils.FakeEndpointGetter{
+		OnResolveEndpoint: func(netip.Addr, uint32, resolverTypes.DatapathContext) *flowpb.Endpoint {
+			lookups.Add(1)
+			return nil
+		},
+	}
+	svcGetter := &testutils.FakeServiceGetter{
+		OnGetServiceByAddr: func(netip.Addr, uint16, u8proto.U8proto) *flowpb.Service {
+			lookups.Add(1)
+			return nil
+		},
+	}
+	nodeGetter := &testutils.FakeNodeGetter{
+		OnGetNodeByAddr: func(netip.Addr) *conntrackpb.Node {
+			lookups.Add(1)
+			return nil
+		},
+	}
+	cache := ctstats.New(func(_ context.Context, yield func(ctstats.Tuple, ctstats.Value) bool) error {
+		yield(ctstats.Tuple{
+			Src: netip.MustParseAddr("10.0.0.1"), Dst: netip.MustParseAddr("10.0.0.2"),
+			SrcPort: 1, DstPort: 80, Proto: 6,
+		}, ctstats.Value{})
+		return nil
+	}, time.Hour, 10)
+
+	snap, err := NewExporter(cache, epGetter, svcGetter, nodeGetter).Snapshot(t.Context(), false)
+	require.NoError(t, err)
+	require.Zero(t, lookups.Load())
+	require.Empty(t, slices.Collect(snap.Endpoints()))
+	require.Empty(t, slices.Collect(snap.Services()))
+	require.Empty(t, slices.Collect(snap.Nodes()))
+	require.Len(t, slices.Collect(snap.Entries()), 1)
 }
 
 func TestExporterNodes(t *testing.T) {
@@ -269,7 +306,7 @@ func TestExporterNodes(t *testing.T) {
 	var snap *Snapshot
 	for range 3 {
 		var err error
-		snap, err = exporter.Snapshot(t.Context())
+		snap, err = exporter.Snapshot(t.Context(), true)
 		require.NoError(t, err)
 	}
 	// node, nodeV6 and world, only once despite the repeated calls.

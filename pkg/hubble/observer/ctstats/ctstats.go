@@ -40,12 +40,15 @@ func NewExporter(
 }
 
 // Snapshot returns the current conntrack stats. Endpoints, services and nodes
-// are resolved only when the underlying ctstats.Snapshot changes, i.e. once per
-// cache refresh. The returned Snapshot is shared and must not be modified.
-func (e *Exporter) Snapshot(ctx context.Context) (*Snapshot, error) {
+// are resolved only if resolve is set, once per cache refresh. The returned
+// Snapshot is shared and must not be modified.
+func (e *Exporter) Snapshot(ctx context.Context, resolve bool) (*Snapshot, error) {
 	snap, err := e.stats.Snapshot(ctx)
 	if err != nil {
 		return nil, err
+	}
+	if !resolve {
+		return newSnapshot(snap), nil
 	}
 
 	e.mu.Lock()
@@ -61,15 +64,7 @@ func (e *Exporter) Snapshot(ctx context.Context) (*Snapshot, error) {
 // others are backends. As it happens at refresh time, a connection no longer
 // alive may be unresolved, or resolved to an endpoint that reused its address.
 func (e *Exporter) resolve(stats *ctstats.Snapshot) *Snapshot {
-	s := &Snapshot{
-		stats:       stats,
-		endpoints:   hubblectstats.NewEndpointDedup(),
-		indices:     make(map[netip.Addr]*uint32),
-		services:    hubblectstats.NewServiceDedup(),
-		svcIndices:  make(map[svcAddr]*uint32),
-		nodes:       hubblectstats.NewNodeDedup(),
-		nodeIndices: make(map[netip.Addr]*uint32),
-	}
+	s := newSnapshot(stats)
 	resolveEndpoint := func(addr netip.Addr) {
 		if _, done := s.indices[addr]; done {
 			return
@@ -134,6 +129,18 @@ type Snapshot struct {
 	nodeIndices map[netip.Addr]*uint32
 }
 
+func newSnapshot(stats *ctstats.Snapshot) *Snapshot {
+	return &Snapshot{
+		stats:       stats,
+		endpoints:   hubblectstats.NewEndpointDedup(),
+		indices:     make(map[netip.Addr]*uint32),
+		services:    hubblectstats.NewServiceDedup(),
+		svcIndices:  make(map[svcAddr]*uint32),
+		nodes:       hubblectstats.NewNodeDedup(),
+		nodeIndices: make(map[netip.Addr]*uint32),
+	}
+}
+
 func (s *Snapshot) Endpoints() iter.Seq[*conntrackpb.IndexedEndpoint] {
 	return hubblectstats.IndexedEndpoints(s.endpoints)
 }
@@ -146,9 +153,8 @@ func (s *Snapshot) Nodes() iter.Seq[*conntrackpb.IndexedNode] {
 	return hubblectstats.IndexedNodes(s.nodes)
 }
 
-// Entries lazily yields one entry per connection in the snapshot, with the
-// TUPLE_F_IN mirrors dropped (see ctstats.Snapshot.Deduplicated), stopping as
-// soon as the consumer stops ranging over the sequence.
+// Entries yields one entry per connection, without the TUPLE_F_IN mirrors (see
+// ctstats.Snapshot.Deduplicated).
 func (s *Snapshot) Entries() iter.Seq[*conntrackpb.Entry] {
 	return func(yield func(*conntrackpb.Entry) bool) {
 		for t, e := range s.stats.Deduplicated() {

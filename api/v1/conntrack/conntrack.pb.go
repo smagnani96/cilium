@@ -28,7 +28,10 @@ const (
 
 // GetStatsRequest is the request of the Observer.GetConntrackStats RPC.
 type GetStatsRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// resolve makes the entries carry the endpoints, services and nodes of
+	// their addresses, which cost a lookup each. They are left out otherwise.
+	Resolve       bool `protobuf:"varint,1,opt,name=resolve,proto3" json:"resolve,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -61,6 +64,13 @@ func (x *GetStatsRequest) ProtoReflect() protoreflect.Message {
 // Deprecated: Use GetStatsRequest.ProtoReflect.Descriptor instead.
 func (*GetStatsRequest) Descriptor() ([]byte, []int) {
 	return file_conntrack_conntrack_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *GetStatsRequest) GetResolve() bool {
+	if x != nil {
+		return x.Resolve
+	}
+	return false
 }
 
 // GetStatsResponse streams the entries themselves, or a status update about
@@ -733,8 +743,9 @@ var File_conntrack_conntrack_proto protoreflect.FileDescriptor
 
 const file_conntrack_conntrack_proto_rawDesc = "" +
 	"\n" +
-	"\x19conntrack/conntrack.proto\x12\tconntrack\x1a\x0fflow/flow.proto\x1a\x11relay/relay.proto\"\x11\n" +
-	"\x0fGetStatsRequest\"\xa8\x02\n" +
+	"\x19conntrack/conntrack.proto\x12\tconntrack\x1a\x0fflow/flow.proto\x1a\x11relay/relay.proto\"+\n" +
+	"\x0fGetStatsRequest\x12\x18\n" +
+	"\aresolve\x18\x01 \x01(\bR\aresolve\"\xa8\x02\n" +
 	"\x10GetStatsResponse\x12(\n" +
 	"\x05entry\x18\x01 \x01(\v2\x10.conntrack.EntryH\x00R\x05entry\x129\n" +
 	"\vnode_status\x18\x02 \x01(\v2\x16.relay.NodeStatusEventH\x00R\n" +

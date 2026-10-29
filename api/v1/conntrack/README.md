@@ -54,6 +54,11 @@ Entry is an entry from a node&#39;s datapath conntrack stats map.
 GetStatsRequest is the request of the Observer.GetConntrackStats RPC.
 
 
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| resolve | [bool](#bool) |  | resolve makes the entries carry the endpoints, services and nodes of their addresses, which cost a lookup each. They are left out otherwise. |
+
+
 
 
 

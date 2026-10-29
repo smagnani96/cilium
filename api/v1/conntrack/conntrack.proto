@@ -11,7 +11,11 @@ package conntrack;
 option go_package = "github.com/cilium/cilium/api/v1/conntrack";
 
 // GetStatsRequest is the request of the Observer.GetConntrackStats RPC.
-message GetStatsRequest {}
+message GetStatsRequest {
+    // resolve makes the entries carry the endpoints, services and nodes of
+    // their addresses, which cost a lookup each. They are left out otherwise.
+    bool resolve = 1;
+}
 
 // GetStatsResponse streams the entries themselves, or a status update about
 // the node. When served by Hubble Relay, entries from all the nodes are

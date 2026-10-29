@@ -273,7 +273,7 @@ func (s *LocalObserverServer) GetConntrackStats(
 	}
 
 	ctx := server.Context()
-	snap, err := s.ctExporter.Snapshot(ctx)
+	snap, err := s.ctExporter.Snapshot(ctx, req.GetResolve())
 	if err != nil {
 		return status.Errorf(codes.Internal, "failed to get conntrack stats: %v", err)
 	}
