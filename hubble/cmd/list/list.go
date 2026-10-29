@@ -18,6 +18,7 @@ import (
 var listOpts struct {
 	output         string
 	serviceEntries bool
+	resolve        bool
 }
 
 // New creates a new list command.

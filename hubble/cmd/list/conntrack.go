@@ -57,6 +57,9 @@ func newCTStatsCommand(vp *viper.Viper) *cobra.Command {
 	enrichmentFlags.BoolVar(
 		&listOpts.serviceEntries, "service-entries", false,
 		"Show the service entries as separate rows in the table output, instead of folding them into the connection they belong to")
+	enrichmentFlags.BoolVar(
+		&listOpts.resolve, "resolve", false,
+		"Resolve the endpoints, services and nodes of the connections")
 	conntrackCmd.Flags().AddFlagSet(enrichmentFlags)
 
 	conntrackCmd.RegisterFlagCompletionFunc("output", func(_ *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
@@ -71,7 +74,7 @@ func newCTStatsCommand(vp *viper.Viper) *cobra.Command {
 }
 
 func runListCTStats(ctx context.Context, cmd *cobra.Command, conn *grpc.ClientConn) error {
-	req := &conntrackpb.GetStatsRequest{}
+	req := &conntrackpb.GetStatsRequest{Resolve: listOpts.resolve}
 	stream, err := observerpb.NewObserverClient(conn).GetConntrackStats(ctx, req)
 	if err != nil {
 		return err
