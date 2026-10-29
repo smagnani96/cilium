@@ -275,6 +275,14 @@ func (s *Server) GetConntrackStats(req *conntrackpb.GetStatsRequest, stream obse
 		}
 	}
 
+	for n := range snap.Nodes() {
+		if err := stream.Send(&conntrackpb.GetStatsResponse{
+			ResponseTypes: &conntrackpb.GetStatsResponse_Node{Node: n},
+		}); err != nil {
+			return err
+		}
+	}
+
 	for e := range snap.Entries() {
 		if err := stream.Send(&conntrackpb.GetStatsResponse{
 			ResponseTypes: &conntrackpb.GetStatsResponse_Entry{Entry: e},

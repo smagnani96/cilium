@@ -21,7 +21,12 @@ import (
 )
 
 func aggregate(entries map[ctKey]*ctValue, e *conntrackpb.Entry) {
-	aggregateCtEntry(entries, e, resolved{}, hubblectstats.NewEndpointDedup(), hubblectstats.NewServiceDedup())
+	(&Snapshot{
+		entries:   entries,
+		endpoints: hubblectstats.NewEndpointDedup(),
+		services:  hubblectstats.NewServiceDedup(),
+		nodes:     hubblectstats.NewNodeDedup(),
+	}).aggregate(e, resolved{})
 }
 
 func TestAggregateGlobalCtEntry(t *testing.T) {
@@ -197,6 +202,12 @@ func serviceResp(idx uint32, svc *flowpb.Service) *conntrackpb.GetStatsResponse 
 	}}
 }
 
+func nodeResp(idx uint32, node *conntrackpb.Node) *conntrackpb.GetStatsResponse {
+	return &conntrackpb.GetStatsResponse{ResponseTypes: &conntrackpb.GetStatsResponse_Node{
+		Node: &conntrackpb.IndexedNode{Index: idx, Node: node},
+	}}
+}
+
 func nodeErrorResp(node string) *conntrackpb.GetStatsResponse {
 	return &conntrackpb.GetStatsResponse{
 		ResponseTypes: &conntrackpb.GetStatsResponse_NodeStatus{
@@ -366,6 +377,59 @@ func TestMergeConntrackResponses_Services(t *testing.T) {
 			require.EqualValues(t, 1, e.GetDestinationServiceIndex())
 		case "10.0.0.3":
 			require.Nil(t, e.DestinationServiceIndex)
+		}
+	}
+}
+
+func TestMergeConntrackResponses_Nodes(t *testing.T) {
+	worker := &conntrackpb.Node{Name: "worker", Cluster: "default", Labels: []string{"zone=a"}}
+	control := &conntrackpb.Node{Name: "control", Cluster: "default"}
+	key := func(src, dst string) *conntrackpb.Key {
+		return &conntrackpb.Key{SourceIp: src, DestinationIp: dst, DestinationPort: 80, Protocol: 6}
+	}
+	idx := func(i uint32) *uint32 { return &i }
+
+	responses := make(chan *PeerResponse, 8)
+	// The same node has a different index on each peer.
+	responses <- peerResp("node-a", nodeResp(0, worker))
+	responses <- peerResp("node-b", nodeResp(0, control))
+	responses <- peerResp("node-b", nodeResp(1, worker))
+	responses <- peerResp("node-a", entryResp(&conntrackpb.Entry{
+		Key: key("10.0.0.1", "192.168.0.1"), Value: &conntrackpb.Value{}, DestinationNodeIndex: idx(0),
+	}))
+	responses <- peerResp("node-b", entryResp(&conntrackpb.Entry{
+		Key: key("10.0.0.2", "192.168.0.1"), Value: &conntrackpb.Value{}, DestinationNodeIndex: idx(1),
+	}))
+	responses <- peerResp("node-b", entryResp(&conntrackpb.Entry{
+		Key: key("192.168.0.2", "10.0.0.2"), Value: &conntrackpb.Value{}, SourceNodeIndex: idx(0),
+	}))
+	// An index the peer never sent is left unresolved.
+	responses <- peerResp("node-a", entryResp(&conntrackpb.Entry{
+		Key: key("10.0.0.3", "10.0.0.4"), Value: &conntrackpb.Value{}, DestinationNodeIndex: idx(9),
+	}))
+	close(responses)
+
+	snap := mergeConntrackResponses(responses)
+	var nodes []*conntrackpb.Node
+	for n := range snap.Nodes() {
+		require.EqualValues(t, len(nodes), n.GetIndex())
+		nodes = append(nodes, n.GetNode())
+	}
+	require.Len(t, nodes, 2)
+	require.Equal(t, "worker", nodes[0].GetName())
+	require.Equal(t, "control", nodes[1].GetName())
+
+	for e := range snap.Entries() {
+		switch e.GetKey().GetSourceIp() {
+		case "10.0.0.1", "10.0.0.2":
+			require.Nil(t, e.SourceNodeIndex)
+			require.EqualValues(t, 0, e.GetDestinationNodeIndex())
+		case "192.168.0.2":
+			require.EqualValues(t, 1, e.GetSourceNodeIndex())
+			require.Nil(t, e.DestinationNodeIndex)
+		case "10.0.0.3":
+			require.Nil(t, e.SourceNodeIndex)
+			require.Nil(t, e.DestinationNodeIndex)
 		}
 	}
 }
