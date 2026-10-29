@@ -19,6 +19,7 @@ import (
 	observerpb "github.com/cilium/cilium/api/v1/observer"
 	relaypb "github.com/cilium/cilium/api/v1/relay"
 	"github.com/cilium/cilium/pkg/hubble/build"
+	observerctstats "github.com/cilium/cilium/pkg/hubble/observer/ctstats"
 	"github.com/cilium/cilium/pkg/hubble/observer/namespace"
 	"github.com/cilium/cilium/pkg/hubble/relay/ctstats"
 	poolTypes "github.com/cilium/cilium/pkg/hubble/relay/pool/types"
@@ -254,12 +255,17 @@ func (s *Server) GetNamespaces(ctx context.Context, req *observerpb.GetNamespace
 // by fanning out to every hubble peer and merging their own conntrack snapshots
 // into a single, cluster-wide snapshot.
 func (s *Server) GetConntrackStats(req *conntrackpb.GetStatsRequest, stream observerpb.Observer_GetConntrackStatsServer) error {
+	query, err := observerctstats.NewQuery(req)
+	if err != nil {
+		return grpcStatus.Error(codes.InvalidArgument, err.Error())
+	}
 	snap, err := s.ctExporter.Snapshot(stream.Context(), req.GetResolve())
 	if err != nil {
 		return err
 	}
 
-	for ep := range snap.Endpoints() {
+	view := query.Apply(snap)
+	for ep := range view.Endpoints() {
 		if err := stream.Send(&conntrackpb.GetStatsResponse{
 			ResponseTypes: &conntrackpb.GetStatsResponse_Endpoint{Endpoint: ep},
 		}); err != nil {
@@ -267,7 +273,7 @@ func (s *Server) GetConntrackStats(req *conntrackpb.GetStatsRequest, stream obse
 		}
 	}
 
-	for svc := range snap.Services() {
+	for svc := range view.Services() {
 		if err := stream.Send(&conntrackpb.GetStatsResponse{
 			ResponseTypes: &conntrackpb.GetStatsResponse_Service{Service: svc},
 		}); err != nil {
@@ -275,7 +281,7 @@ func (s *Server) GetConntrackStats(req *conntrackpb.GetStatsRequest, stream obse
 		}
 	}
 
-	for n := range snap.Nodes() {
+	for n := range view.Nodes() {
 		if err := stream.Send(&conntrackpb.GetStatsResponse{
 			ResponseTypes: &conntrackpb.GetStatsResponse_Node{Node: n},
 		}); err != nil {
@@ -283,7 +289,7 @@ func (s *Server) GetConntrackStats(req *conntrackpb.GetStatsRequest, stream obse
 		}
 	}
 
-	for e := range snap.Entries() {
+	for e := range view.Entries() {
 		if err := stream.Send(&conntrackpb.GetStatsResponse{
 			ResponseTypes: &conntrackpb.GetStatsResponse_Entry{Entry: e},
 		}); err != nil {

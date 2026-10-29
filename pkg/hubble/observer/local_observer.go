@@ -271,6 +271,10 @@ func (s *LocalObserverServer) GetConntrackStats(
 	if s.ctExporter == nil {
 		return status.Error(codes.Unavailable, "conntrack stats are not enabled")
 	}
+	query, err := observerctstats.NewQuery(req)
+	if err != nil {
+		return status.Error(codes.InvalidArgument, err.Error())
+	}
 
 	ctx := server.Context()
 	snap, err := s.ctExporter.Snapshot(ctx, req.GetResolve())
@@ -278,7 +282,8 @@ func (s *LocalObserverServer) GetConntrackStats(
 		return status.Errorf(codes.Internal, "failed to get conntrack stats: %v", err)
 	}
 
-	for ep := range snap.Endpoints() {
+	view := query.Apply(snap)
+	for ep := range view.Endpoints() {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -289,7 +294,7 @@ func (s *LocalObserverServer) GetConntrackStats(
 		}
 	}
 
-	for svc := range snap.Services() {
+	for svc := range view.Services() {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -300,7 +305,7 @@ func (s *LocalObserverServer) GetConntrackStats(
 		}
 	}
 
-	for n := range snap.Nodes() {
+	for n := range view.Nodes() {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -311,7 +316,7 @@ func (s *LocalObserverServer) GetConntrackStats(
 		}
 	}
 
-	for e := range snap.Entries() {
+	for e := range view.Entries() {
 		if err := ctx.Err(); err != nil {
 			return err
 		}

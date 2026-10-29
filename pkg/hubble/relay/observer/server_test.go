@@ -1569,6 +1569,24 @@ func TestGetConntrackStats_Resolve(t *testing.T) {
 	require.Equal(t, []bool{false, true}, requested)
 }
 
+func TestGetConntrackStats_InvalidFilter(t *testing.T) {
+	srv, err := NewServer(
+		&testutils.FakePeerLister{OnList: func() []poolTypes.Peer { return nil }},
+		WithLogger(slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))),
+	)
+	require.NoError(t, err)
+	stream := &testutils.FakeGetConntrackStatsServer{
+		FakeGRPCServerStream: &testutils.FakeGRPCServerStream{OnContext: context.TODO},
+	}
+	for _, f := range []*conntrackpb.Filter{
+		{SourceEndpoint: []string{"a"}},
+		{SourceIp: []string{"10.0.0"}},
+	} {
+		err := srv.GetConntrackStats(&conntrackpb.GetStatsRequest{Filter: f}, stream)
+		require.Equal(t, codes.InvalidArgument, status.Code(err))
+	}
+}
+
 func TestGetConntrackStats_PeerError(t *testing.T) {
 	peers := []poolTypes.Peer{
 		{

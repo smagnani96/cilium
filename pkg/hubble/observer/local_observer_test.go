@@ -845,6 +845,11 @@ func TestLocalObserverServer_GetConntrackStats(t *testing.T) {
 		require.Nil(t, e.SourceEndpointIndex)
 		require.Nil(t, e.DestinationEndpointIndex)
 		require.Nil(t, e.SourceNodeIndex)
+
+		err = s.GetConntrackStats(&conntrackpb.GetStatsRequest{
+			Filter: &conntrackpb.Filter{SourceNode: []string{"worker"}},
+		}, &testutils.FakeGetConntrackStatsServer{FakeGRPCServerStream: &testutils.FakeGRPCServerStream{OnContext: t.Context}})
+		require.Equal(t, codes.InvalidArgument, status.Code(err))
 	})
 }
 
