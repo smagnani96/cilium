@@ -251,6 +251,10 @@ func PruneStatsEntry(statsMap StatsMap, event GCEvent) {
 		return
 	}
 
+	if event.Key.GetFlags()&TUPLE_F_SERVICE != 0 {
+		return
+	}
+
 	family := statsMap.Family()
 	var protocol string
 	if isKeyTCP(event.Key) {
@@ -335,6 +339,10 @@ func (c *statsCollector) collectMap(statsMap StatsMap, ch chan<- prometheus.Metr
 	)
 
 	err := statsMap.DumpWithCallback(func(k StatsKey, v *CtStats) {
+		// A service entry accounts again the packets of its backend entry.
+		if k.GetFlags()&TUPLE_F_SERVICE != 0 {
+			return
+		}
 		if isKeyTCP(k) {
 			tcpTotal.Add(v)
 			tcpEntries++
