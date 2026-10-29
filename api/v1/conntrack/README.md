@@ -8,6 +8,7 @@
     - [GetStatsRequest](#conntrack-GetStatsRequest)
     - [GetStatsResponse](#conntrack-GetStatsResponse)
     - [IndexedEndpoint](#conntrack-IndexedEndpoint)
+    - [IndexedService](#conntrack-IndexedService)
     - [Key](#conntrack-Key)
     - [State](#conntrack-State)
     - [Value](#conntrack-Value)
@@ -36,6 +37,7 @@ Entry is an entry from a node&#39;s datapath conntrack stats map.
 | state | [State](#conntrack-State) |  |  |
 | source_endpoint_index | [uint32](#uint32) | optional | source_endpoint_index and destination_endpoint_index reference the IndexedEndpoint resolved for the respective IP. They are unset if the endpoint could not be resolved. |
 | destination_endpoint_index | [uint32](#uint32) | optional |  |
+| destination_service_index | [uint32](#uint32) | optional | destination_service_index references the IndexedService matching the destination IP and port. It is unset if no service matches. |
 
 
 
@@ -58,8 +60,8 @@ GetStatsRequest is the request of the Observer.GetConntrackStats RPC.
 GetStatsResponse streams the entries themselves, or a status update about
 the node. When served by Hubble Relay, entries from all the nodes are
 aggregated and each node&#39;s issues are reported as node statuses.
-Every IndexedEndpoint referenced by an entry is guaranteed to be sent, once,
-before the entries referencing it.
+Every IndexedEndpoint and IndexedService referenced by an entry is guaranteed
+to be sent, once, before the entries referencing it.
 
 
 | Field | Type | Label | Description |
@@ -67,6 +69,7 @@ before the entries referencing it.
 | entry | [Entry](#conntrack-Entry) |  |  |
 | node_status | [relay.NodeStatusEvent](#relay-NodeStatusEvent) |  |  |
 | endpoint | [IndexedEndpoint](#conntrack-IndexedEndpoint) |  |  |
+| service | [IndexedService](#conntrack-IndexedService) |  |  |
 
 
 
@@ -84,6 +87,23 @@ sharing it.
 | ----- | ---- | ----- | ----------- |
 | index | [uint32](#uint32) |  |  |
 | endpoint | [flow.Endpoint](#flow-Endpoint) |  |  |
+
+
+
+
+
+
+<a name="conntrack-IndexedService"></a>
+
+### IndexedService
+IndexedService is a resolved service, referenced by index from the entries
+sharing it.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| index | [uint32](#uint32) |  |  |
+| service | [flow.Service](#flow-Service) |  |  |
 
 
 

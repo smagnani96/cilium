@@ -16,13 +16,14 @@ message GetStatsRequest {}
 // GetStatsResponse streams the entries themselves, or a status update about
 // the node. When served by Hubble Relay, entries from all the nodes are
 // aggregated and each node's issues are reported as node statuses.
-// Every IndexedEndpoint referenced by an entry is guaranteed to be sent, once,
-// before the entries referencing it.
+// Every IndexedEndpoint and IndexedService referenced by an entry is guaranteed
+// to be sent, once, before the entries referencing it.
 message GetStatsResponse {
     oneof response_types {
         Entry entry = 1;
         relay.NodeStatusEvent node_status = 2;
         IndexedEndpoint endpoint = 3;
+        IndexedService service = 4;
     }
 }
 
@@ -37,6 +38,10 @@ message Entry {
     // endpoint could not be resolved.
     optional uint32 source_endpoint_index = 4;
     optional uint32 destination_endpoint_index = 5;
+
+    // destination_service_index references the IndexedService matching the
+    // destination IP and port. It is unset if no service matches.
+    optional uint32 destination_service_index = 6;
 }
 
 // IndexedEndpoint is a resolved endpoint, referenced by index from the entries
@@ -44,6 +49,13 @@ message Entry {
 message IndexedEndpoint {
     uint32 index = 1;
     flow.Endpoint endpoint = 2;
+}
+
+// IndexedService is a resolved service, referenced by index from the entries
+// sharing it.
+message IndexedService {
+    uint32 index = 1;
+    flow.Service service = 2;
 }
 
 // Key represents the key of a conntrack stats entry.
