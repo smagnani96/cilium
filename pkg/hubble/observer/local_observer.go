@@ -300,6 +300,17 @@ func (s *LocalObserverServer) GetConntrackStats(
 		}
 	}
 
+	for n := range snap.Nodes() {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := server.Send(&conntrackpb.GetStatsResponse{
+			ResponseTypes: &conntrackpb.GetStatsResponse_Node{Node: n},
+		}); err != nil {
+			return err
+		}
+	}
+
 	for e := range snap.Entries() {
 		if err := ctx.Err(); err != nil {
 			return err

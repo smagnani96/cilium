@@ -13,6 +13,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	conntrackpb "github.com/cilium/cilium/api/v1/conntrack"
 	flowpb "github.com/cilium/cilium/api/v1/flow"
 	"github.com/cilium/cilium/pkg/ctstats"
 	resolverTypes "github.com/cilium/cilium/pkg/hubble/resolver/types"
@@ -42,7 +43,7 @@ func TestSnapshotEntries(t *testing.T) {
 		}(): {Alive: true},
 	}}
 
-	e := &Exporter{epGetter: &testutils.NoopEndpointGetter, svcGetter: &testutils.NoopServiceGetter}
+	e := &Exporter{epGetter: &testutils.NoopEndpointGetter, svcGetter: &testutils.NoopServiceGetter, nodeGetter: &testutils.NoopNodeGetter}
 	got := slices.Collect(e.resolve(stats).Entries())
 	require.Len(t, got, 3)
 
@@ -103,7 +104,7 @@ func TestExporterEndpoints(t *testing.T) {
 		}
 		return nil
 	}, time.Hour, 10)
-	exporter := NewExporter(cache, epGetter, &testutils.NoopServiceGetter)
+	exporter := NewExporter(cache, epGetter, &testutils.NoopServiceGetter, &testutils.NoopNodeGetter)
 
 	var snap *Snapshot
 	for range 3 {
@@ -142,7 +143,7 @@ func TestExporterEndpoints(t *testing.T) {
 	exporter = NewExporter(ctstats.New(func(_ context.Context, yield func(ctstats.Tuple, ctstats.Value) bool) error {
 		yield(conns[0], ctstats.Value{})
 		return nil
-	}, time.Nanosecond, 10), epGetter, &testutils.NoopServiceGetter)
+	}, time.Nanosecond, 10), epGetter, &testutils.NoopServiceGetter, &testutils.NoopNodeGetter)
 	resolutions.Store(0)
 	for range 2 {
 		_, err := exporter.Snapshot(t.Context())
@@ -188,7 +189,7 @@ func TestExporterServices(t *testing.T) {
 		}
 		return nil
 	}, time.Hour, 10)
-	exporter := NewExporter(cache, &testutils.NoopEndpointGetter, svcGetter)
+	exporter := NewExporter(cache, &testutils.NoopEndpointGetter, svcGetter, &testutils.NoopNodeGetter)
 
 	var snap *Snapshot
 	for range 3 {
@@ -216,6 +217,83 @@ func TestExporterServices(t *testing.T) {
 			require.Nil(t, e.DestinationServiceIndex, "unresolved service must be unset")
 		case 5, 80:
 			require.Nil(t, e.DestinationServiceIndex, "regular entries must not be looked up")
+		}
+	}
+}
+
+func TestExporterNodes(t *testing.T) {
+	var (
+		pod     = netip.MustParseAddr("10.0.0.1")
+		node    = netip.MustParseAddr("192.168.0.1")
+		nodeV6  = netip.MustParseAddr("fd00::1")
+		world   = netip.MustParseAddr("1.1.1.1")
+		vip     = netip.MustParseAddr("10.96.0.1")
+		workers = map[netip.Addr]*conntrackpb.Node{
+			node:   {Name: "worker", Labels: []string{"zone=a"}},
+			nodeV6: {Name: "worker", Labels: []string{"zone=a"}},
+			// A pod is never looked up, even if its address belongs to a node.
+			pod: {Name: "other"},
+			vip: {Name: "other"},
+		}
+	)
+	epGetter := &testutils.FakeEndpointGetter{
+		OnResolveEndpoint: func(ip netip.Addr, _ uint32, _ resolverTypes.DatapathContext) *flowpb.Endpoint {
+			if ip == pod {
+				return &flowpb.Endpoint{Namespace: "default", PodName: "web"}
+			}
+			return &flowpb.Endpoint{Labels: []string{"reserved:host"}}
+		},
+	}
+	var lookups atomic.Int32
+	nodeGetter := &testutils.FakeNodeGetter{
+		OnGetNodeByAddr: func(ip netip.Addr) *conntrackpb.Node {
+			lookups.Add(1)
+			return workers[ip]
+		},
+	}
+
+	conns := []ctstats.Tuple{
+		{Src: pod, Dst: node, SrcPort: 1, DstPort: 80, Proto: 6},
+		{Src: pod, Dst: nodeV6, SrcPort: 2, DstPort: 80, Proto: 6},
+		{Src: node, Dst: world, SrcPort: 3, DstPort: 443, Proto: 6},
+		{Src: pod, Dst: vip, SrcPort: 4, DstPort: 80, Proto: 6, Flags: ctstats.TupleFlagService},
+	}
+	cache := ctstats.New(func(_ context.Context, yield func(ctstats.Tuple, ctstats.Value) bool) error {
+		for _, c := range conns {
+			yield(c, ctstats.Value{})
+		}
+		return nil
+	}, time.Hour, 10)
+	exporter := NewExporter(cache, epGetter, &testutils.NoopServiceGetter, nodeGetter)
+
+	var snap *Snapshot
+	for range 3 {
+		var err error
+		snap, err = exporter.Snapshot(t.Context())
+		require.NoError(t, err)
+	}
+	// node, nodeV6 and world, only once despite the repeated calls.
+	require.EqualValues(t, 3, lookups.Load())
+
+	var nodes []*conntrackpb.Node
+	for n := range snap.Nodes() {
+		require.EqualValues(t, len(nodes), n.GetIndex())
+		nodes = append(nodes, n.GetNode())
+	}
+	require.Len(t, nodes, 1, "the two addresses of the node must share it")
+	require.Equal(t, "worker", nodes[0].GetName())
+
+	for e := range snap.Entries() {
+		switch e.GetKey().GetSourcePort() {
+		case 1, 2:
+			require.Nil(t, e.SourceNodeIndex)
+			require.EqualValues(t, 0, e.GetDestinationNodeIndex())
+		case 3:
+			require.EqualValues(t, 0, e.GetSourceNodeIndex())
+			require.Nil(t, e.DestinationNodeIndex, "unresolved node must be unset")
+		case 4:
+			require.Nil(t, e.SourceNodeIndex)
+			require.Nil(t, e.DestinationNodeIndex, "service address must not be resolved")
 		}
 	}
 }

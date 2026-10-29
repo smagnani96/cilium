@@ -795,7 +795,15 @@ func TestLocalObserverServer_GetConntrackStats(t *testing.T) {
 			yield(tuple, ctstats.Value{RxPackets: 1, TxPackets: 2, RxBytes: 3, TxBytes: 4})
 			return nil
 		}, time.Minute, 10)
-		exporter := observerctstats.NewExporter(cache, &testutils.NoopEndpointGetter, &testutils.NoopServiceGetter)
+		nodeGetter := &testutils.FakeNodeGetter{
+			OnGetNodeByAddr: func(ip netip.Addr) *conntrackpb.Node {
+				if ip == tuple.Src {
+					return &conntrackpb.Node{Name: "worker"}
+				}
+				return nil
+			},
+		}
+		exporter := observerctstats.NewExporter(cache, &testutils.NoopEndpointGetter, &testutils.NoopServiceGetter, nodeGetter)
 		s, err := NewLocalServer(pp, nm, exporter, hivetest.Logger(t))
 		require.NoError(t, err)
 
@@ -808,12 +816,15 @@ func TestLocalObserverServer_GetConntrackStats(t *testing.T) {
 			FakeGRPCServerStream: &testutils.FakeGRPCServerStream{OnContext: t.Context},
 		})
 		require.NoError(t, err)
-		// The endpoint is sent once, before the entry referencing it.
-		require.Len(t, got, 2)
+		// The endpoint and node are sent once, before the entry referencing them.
+		require.Len(t, got, 3)
 		require.EqualValues(t, 0, got[0].GetEndpoint().GetIndex())
-		e := got[1].GetEntry()
+		require.Equal(t, "worker", got[1].GetNode().GetNode().GetName())
+		e := got[2].GetEntry()
 		require.EqualValues(t, 0, e.GetSourceEndpointIndex())
 		require.EqualValues(t, 0, e.GetDestinationEndpointIndex())
+		require.EqualValues(t, 0, e.GetSourceNodeIndex())
+		require.Nil(t, e.DestinationNodeIndex)
 		require.Equal(t, "10.0.0.1", e.GetKey().GetSourceIp())
 		require.EqualValues(t, 80, e.GetKey().GetDestinationPort())
 		require.EqualValues(t, 4, e.GetValue().GetTxBytes())

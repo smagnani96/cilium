@@ -70,6 +70,7 @@ type hubbleIntegration struct {
 	ctStats           *ctstats.Cache
 	endpointGetter    resolverTypes.EndpointGetter
 	serviceGetter     resolverTypes.ServiceGetter
+	nodeGetter        resolverTypes.NodeGetter
 	exporters         []exporter.FlowLogExporter
 
 	// dropEventEmitter emits Kubernetes events for packet drops.
@@ -101,6 +102,7 @@ func createHubbleIntegration(
 	ctStats *ctstats.Cache,
 	endpointGetter resolverTypes.EndpointGetter,
 	serviceGetter resolverTypes.ServiceGetter,
+	nodeGetter resolverTypes.NodeGetter,
 	observerOptions []observeroption.Option,
 	exporterBuilders []*exportercell.FlowLogExporterBuilder,
 	dropEventEmitter dropeventemitter.FlowProcessor,
@@ -134,6 +136,7 @@ func createHubbleIntegration(
 		ctStats:              ctStats,
 		endpointGetter:       endpointGetter,
 		serviceGetter:        serviceGetter,
+		nodeGetter:           nodeGetter,
 		observerOptions:      observerOptions,
 		exporters:            exporters,
 		dropEventEmitter:     dropEventEmitter,
@@ -279,7 +282,7 @@ func (h *hubbleIntegration) launch(ctx context.Context) (*observer.LocalObserver
 
 	var ctExporter *observerctstats.Exporter
 	if h.ctStats != nil {
-		ctExporter = observerctstats.NewExporter(h.ctStats, h.endpointGetter, h.serviceGetter)
+		ctExporter = observerctstats.NewExporter(h.ctStats, h.endpointGetter, h.serviceGetter, h.nodeGetter)
 	}
 
 	hubbleObserver, err := observer.NewLocalServer(
