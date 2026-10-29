@@ -21,7 +21,7 @@ import (
 )
 
 func aggregate(entries map[ctKey]*ctValue, e *conntrackpb.Entry) {
-	aggregateCtEntry(entries, e, nil, nil, hubblectstats.NewEndpointDedup())
+	aggregateCtEntry(entries, e, resolved{}, hubblectstats.NewEndpointDedup(), hubblectstats.NewServiceDedup())
 }
 
 func TestAggregateGlobalCtEntry(t *testing.T) {
@@ -191,6 +191,12 @@ func endpointResp(idx uint32, ep *flowpb.Endpoint) *conntrackpb.GetStatsResponse
 	}}
 }
 
+func serviceResp(idx uint32, svc *flowpb.Service) *conntrackpb.GetStatsResponse {
+	return &conntrackpb.GetStatsResponse{ResponseTypes: &conntrackpb.GetStatsResponse_Service{
+		Service: &conntrackpb.IndexedService{Index: idx, Service: svc},
+	}}
+}
+
 func nodeErrorResp(node string) *conntrackpb.GetStatsResponse {
 	return &conntrackpb.GetStatsResponse{
 		ResponseTypes: &conntrackpb.GetStatsResponse_NodeStatus{
@@ -312,6 +318,56 @@ func TestMergeConntrackResponses_EndpointsKeptOnCanonicalSwitch(t *testing.T) {
 	require.Zero(t, entries[0].GetKey().GetFlags())
 	require.EqualValues(t, 0, entries[0].GetSourceEndpointIndex())
 	require.Nil(t, entries[0].DestinationEndpointIndex)
+}
+
+func TestMergeConntrackResponses_Services(t *testing.T) {
+	web := &flowpb.Service{Namespace: "default", Name: "web"}
+	db := &flowpb.Service{Namespace: "default", Name: "db"}
+	key := func(src, dst string) *conntrackpb.Key {
+		return &conntrackpb.Key{SourceIp: src, DestinationIp: dst, DestinationPort: 80, Protocol: 6}
+	}
+	idx := func(i uint32) *uint32 { return &i }
+
+	responses := make(chan *PeerResponse, 8)
+	// The same service has a different index on each node.
+	responses <- peerResp("node-a", serviceResp(0, web))
+	responses <- peerResp("node-b", serviceResp(0, db))
+	responses <- peerResp("node-b", serviceResp(1, web))
+	responses <- peerResp("node-a", entryResp(&conntrackpb.Entry{
+		Key: key("10.0.0.1", "10.96.0.1"), Value: &conntrackpb.Value{}, DestinationServiceIndex: idx(0),
+	}))
+	responses <- peerResp("node-b", entryResp(&conntrackpb.Entry{
+		Key: key("10.0.0.2", "10.96.0.1"), Value: &conntrackpb.Value{}, DestinationServiceIndex: idx(1),
+	}))
+	responses <- peerResp("node-b", entryResp(&conntrackpb.Entry{
+		Key: key("10.0.0.4", "10.96.0.2"), Value: &conntrackpb.Value{}, DestinationServiceIndex: idx(0),
+	}))
+	// An index the peer never sent is left unresolved.
+	responses <- peerResp("node-a", entryResp(&conntrackpb.Entry{
+		Key: key("10.0.0.3", "10.0.0.4"), Value: &conntrackpb.Value{}, DestinationServiceIndex: idx(9),
+	}))
+	close(responses)
+
+	snap := mergeConntrackResponses(responses)
+	var services []*flowpb.Service
+	for svc := range snap.Services() {
+		require.EqualValues(t, len(services), svc.GetIndex())
+		services = append(services, svc.GetService())
+	}
+	require.Len(t, services, 2)
+	require.Equal(t, "web", services[0].GetName())
+	require.Equal(t, "db", services[1].GetName())
+
+	for e := range snap.Entries() {
+		switch e.GetKey().GetSourceIp() {
+		case "10.0.0.1", "10.0.0.2":
+			require.EqualValues(t, 0, e.GetDestinationServiceIndex())
+		case "10.0.0.4":
+			require.EqualValues(t, 1, e.GetDestinationServiceIndex())
+		case "10.0.0.3":
+			require.Nil(t, e.DestinationServiceIndex)
+		}
+	}
 }
 
 func TestExporterCache(t *testing.T) {

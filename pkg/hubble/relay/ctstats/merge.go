@@ -28,13 +28,14 @@ type ctValue struct {
 	flags uint32
 	alive bool
 	// srcEndpoint and dstEndpoint index into the Snapshot's endpoints, nil
-	// until a peer resolves them.
+	// until a peer resolves them. dstService does the same for the services.
 	srcEndpoint, dstEndpoint *uint32
+	dstService               *uint32
 }
 
 // PeerResponse is a response along with the name of the peer that sent it.
-// The peer is needed as endpoint indices are only meaningful within the stream
-// of the peer that assigned them.
+// The peer is needed as endpoint and service indices are only meaningful within
+// the stream of the peer that assigned them.
 type PeerResponse struct {
 	Peer     string
 	Response *conntrackpb.GetStatsResponse
@@ -43,6 +44,7 @@ type PeerResponse struct {
 type Snapshot struct {
 	entries      map[ctKey]*ctValue
 	endpoints    *hubblectstats.EndpointDedup
+	services     *hubblectstats.ServiceDedup
 	nodeStatuses []*conntrackpb.GetStatsResponse
 }
 
@@ -67,6 +69,7 @@ func (c *Snapshot) Entries() iter.Seq[*conntrackpb.Entry] {
 				State:                    &conntrackpb.State{Alive: v.alive},
 				SourceEndpointIndex:      v.srcEndpoint,
 				DestinationEndpointIndex: v.dstEndpoint,
+				DestinationServiceIndex:  v.dstService,
 			}
 			if !yield(e) {
 				return
@@ -77,6 +80,10 @@ func (c *Snapshot) Entries() iter.Seq[*conntrackpb.Entry] {
 
 func (c *Snapshot) Endpoints() iter.Seq[*conntrackpb.IndexedEndpoint] {
 	return hubblectstats.IndexedEndpoints(c.endpoints)
+}
+
+func (c *Snapshot) Services() iter.Seq[*conntrackpb.IndexedService] {
+	return hubblectstats.IndexedServices(c.services)
 }
 
 func (c *Snapshot) NodeStatuses() iter.Seq[*conntrackpb.GetStatsResponse] {
@@ -130,16 +137,19 @@ func (c *StatsExporter) Snapshot(ctx context.Context) (*Snapshot, error) {
 // mergeConntrackResponses merges the responses of the peers into a Snapshot with
 // an entry per connection, setting the node statuses aside.
 //
-// Endpoint indices are local to the stream of the peer that assigned them, so
-// they are resolved against that peer's endpoints and re-indexed in the
-// cluster-wide Snapshot, where each distinct endpoint is kept only once.
+// Endpoint and service indices are local to the stream of the peer that
+// assigned them, so they are resolved against that peer's endpoints and
+// services and re-indexed in the cluster-wide Snapshot, where each distinct
+// endpoint and service is kept only once.
 func mergeConntrackResponses(responses <-chan *PeerResponse) *Snapshot {
 	snap := &Snapshot{
 		entries:      make(map[ctKey]*ctValue),
 		endpoints:    hubblectstats.NewEndpointDedup(),
+		services:     hubblectstats.NewServiceDedup(),
 		nodeStatuses: make([]*conntrackpb.GetStatsResponse, 0),
 	}
 	peerEndpoints := make(map[string]map[uint32]*flowpb.Endpoint)
+	peerServices := make(map[string]map[uint32]*flowpb.Service)
 
 	for pr := range responses {
 		resp := pr.Response
@@ -154,16 +164,26 @@ func mergeConntrackResponses(responses <-chan *PeerResponse) *Snapshot {
 			peerEndpoints[pr.Peer][ep.GetIndex()] = ep.GetEndpoint()
 			continue
 		}
+		if svc := resp.GetService(); svc != nil {
+			if peerServices[pr.Peer] == nil {
+				peerServices[pr.Peer] = make(map[uint32]*flowpb.Service)
+			}
+			peerServices[pr.Peer][svc.GetIndex()] = svc.GetService()
+			continue
+		}
 		if e := resp.GetEntry(); e != nil {
-			eps := peerEndpoints[pr.Peer]
-			var src, dst *flowpb.Endpoint
+			eps, svcs := peerEndpoints[pr.Peer], peerServices[pr.Peer]
+			var res resolved
 			if idx := e.SourceEndpointIndex; idx != nil {
-				src = eps[*idx]
+				res.srcEndpoint = eps[*idx]
 			}
 			if idx := e.DestinationEndpointIndex; idx != nil {
-				dst = eps[*idx]
+				res.dstEndpoint = eps[*idx]
 			}
-			aggregateCtEntry(snap.entries, e, src, dst, snap.endpoints)
+			if idx := e.DestinationServiceIndex; idx != nil {
+				res.dstService = svcs[*idx]
+			}
+			aggregateCtEntry(snap.entries, e, res, snap.endpoints, snap.services)
 		}
 	}
 
@@ -191,14 +211,15 @@ func valueOf(val *conntrackpb.Entry) *ctValue {
 // TUPLE_F_IN mirror is dropped in favour of the canonical entry, while repeated
 // observations keep the maximum counters.
 //
-// src and dst are the endpoints val's peer resolved, if any. The first
+// res holds the endpoints and services val's peer resolved, if any. The first
 // resolution of a connection wins: it is kept even if the view it was
 // reported with is replaced, and a later unresolved observation never clears it.
 func aggregateCtEntry(
 	entries map[ctKey]*ctValue,
 	val *conntrackpb.Entry,
-	src, dst *flowpb.Endpoint,
-	dedup *hubblectstats.EndpointDedup,
+	res resolved,
+	endpoints *hubblectstats.EndpointDedup,
+	services *hubblectstats.ServiceDedup,
 ) {
 	rawFlags := val.GetKey().GetFlags()
 	k := keyOf(val.GetKey())
@@ -213,6 +234,7 @@ func aggregateCtEntry(
 		// val is the canonical view instead.
 		canonical := valueOf(val)
 		canonical.srcEndpoint, canonical.dstEndpoint = e.srcEndpoint, e.dstEndpoint
+		canonical.dstService = e.dstService
 		entries[k] = canonical
 		e = canonical
 	default:
@@ -221,16 +243,25 @@ func aggregateCtEntry(
 	}
 
 	if e.srcEndpoint == nil {
-		e.srcEndpoint = indexOf(dedup, src)
+		e.srcEndpoint = indexOf(endpoints, res.srcEndpoint)
 	}
 	if e.dstEndpoint == nil {
-		e.dstEndpoint = indexOf(dedup, dst)
+		e.dstEndpoint = indexOf(endpoints, res.dstEndpoint)
+	}
+	if e.dstService == nil {
+		e.dstService = indexOf(services, res.dstService)
 	}
 }
 
-// indexOf returns the index of ep in dedup, nil if ep is nil.
-func indexOf(dedup *hubblectstats.EndpointDedup, ep *flowpb.Endpoint) *uint32 {
-	idx, ok := dedup.Index(ep)
+// resolved holds the endpoints and services of the two sides of an entry.
+type resolved struct {
+	srcEndpoint, dstEndpoint *flowpb.Endpoint
+	dstService               *flowpb.Service
+}
+
+// indexOf returns the index of v in dedup, nil if v is nil.
+func indexOf[K, V comparable](dedup *hubblectstats.Dedup[K, V], v V) *uint32 {
+	idx, ok := dedup.Index(v)
 	if !ok {
 		return nil
 	}
