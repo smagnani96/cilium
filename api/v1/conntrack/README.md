@@ -8,8 +8,10 @@
     - [GetStatsRequest](#conntrack-GetStatsRequest)
     - [GetStatsResponse](#conntrack-GetStatsResponse)
     - [IndexedEndpoint](#conntrack-IndexedEndpoint)
+    - [IndexedNode](#conntrack-IndexedNode)
     - [IndexedService](#conntrack-IndexedService)
     - [Key](#conntrack-Key)
+    - [Node](#conntrack-Node)
     - [State](#conntrack-State)
     - [Value](#conntrack-Value)
   
@@ -38,6 +40,8 @@ Entry is an entry from a node&#39;s datapath conntrack stats map.
 | source_endpoint_index | [uint32](#uint32) | optional | source_endpoint_index and destination_endpoint_index reference the IndexedEndpoint resolved for the respective IP. They are unset if the endpoint could not be resolved. |
 | destination_endpoint_index | [uint32](#uint32) | optional |  |
 | destination_service_index | [uint32](#uint32) | optional | destination_service_index references the IndexedService matching the destination IP and port. It is unset if no service matches. |
+| source_node_index | [uint32](#uint32) | optional | source_node_index and destination_node_index reference the IndexedNode owning the respective IP. They are unset if the IP is not resolved to a node, which is only attempted for those not resolved to a pod. |
+| destination_node_index | [uint32](#uint32) | optional |  |
 
 
 
@@ -60,8 +64,8 @@ GetStatsRequest is the request of the Observer.GetConntrackStats RPC.
 GetStatsResponse streams the entries themselves, or a status update about
 the node. When served by Hubble Relay, entries from all the nodes are
 aggregated and each node&#39;s issues are reported as node statuses.
-Every IndexedEndpoint and IndexedService referenced by an entry is guaranteed
-to be sent, once, before the entries referencing it.
+Every IndexedEndpoint, IndexedService and IndexedNode referenced by an entry
+is guaranteed to be sent, once, before the entries referencing it.
 
 
 | Field | Type | Label | Description |
@@ -70,6 +74,7 @@ to be sent, once, before the entries referencing it.
 | node_status | [relay.NodeStatusEvent](#relay-NodeStatusEvent) |  |  |
 | endpoint | [IndexedEndpoint](#conntrack-IndexedEndpoint) |  |  |
 | service | [IndexedService](#conntrack-IndexedService) |  |  |
+| node | [IndexedNode](#conntrack-IndexedNode) |  |  |
 
 
 
@@ -87,6 +92,22 @@ sharing it.
 | ----- | ---- | ----- | ----------- |
 | index | [uint32](#uint32) |  |  |
 | endpoint | [flow.Endpoint](#flow-Endpoint) |  |  |
+
+
+
+
+
+
+<a name="conntrack-IndexedNode"></a>
+
+### IndexedNode
+IndexedNode is a resolved node, referenced by index from the entries sharing it.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| index | [uint32](#uint32) |  |  |
+| node | [Node](#conntrack-Node) |  |  |
 
 
 
@@ -124,6 +145,24 @@ Key represents the key of a conntrack stats entry.
 | destination_port | [uint32](#uint32) |  |  |
 | protocol | [uint32](#uint32) |  |  |
 | flags | [uint32](#uint32) |  |  |
+
+
+
+
+
+
+<a name="conntrack-Node"></a>
+
+### Node
+Node is a Cilium node, identified by its cluster and name.
+labels are the node labels, as sorted key=value pairs.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| name | [string](#string) |  |  |
+| cluster | [string](#string) |  |  |
+| labels | [string](#string) | repeated |  |
 
 
 
